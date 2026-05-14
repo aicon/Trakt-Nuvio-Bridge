@@ -46,7 +46,6 @@ Then open `http://127.0.0.1:4173/`.
 When `TRAKT_CLIENT_ID` is set, `server.js` serves the browser config automatically. The public client ID is not preloaded into the page; it is returned by the login endpoint after the user presses `Connect Trakt`.
 
 
-
 ## ID mapping notes
 
 Nuvio examples use IDs like `tmdb:550`, while Nuvio's own Trakt import code prefers IMDb IDs when Trakt provides them, then `tmdb:<id>`, then numeric `trakt:<id>`. The bridge follows that same order. TVDB IDs and Trakt slugs are only used for matching your optional remaps; they are not pushed raw because Nuvio's Trakt ID parser does not treat them as primary content IDs.

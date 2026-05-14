@@ -137,20 +137,28 @@ function updateAuthStatus() {
   dom.nuvioStatus.textContent = nuvioConnected ? "Nuvio connected" : "Nuvio disconnected";
   dom.nuvioStatus.classList.toggle("is-connected", nuvioConnected);
   updateAuthButtons(traktConnected, nuvioConnected);
+  updateSyncActionButtons(traktConnected, nuvioConnected);
 }
 
 function updateAuthButtons(traktConnected, nuvioConnected) {
-  updateConnectedButton(dom.startTraktLogin, traktConnected, "Trakt Connected");
-  updateConnectedButton(dom.loginNuvio, nuvioConnected, "Nuvio Connected");
+  updateConnectedButton(dom.startTraktLogin, traktConnected, "Disconnect Trakt");
+  updateConnectedButton(dom.loginNuvio, nuvioConnected, "Disconnect");
+}
+
+function updateSyncActionButtons(traktConnected, nuvioConnected) {
+  const ready = traktConnected && nuvioConnected;
+  dom.previewSync.disabled = !ready;
+  dom.runSync.disabled = !ready;
 }
 
 function updateConnectedButton(button, connected, connectedLabel) {
   if (!button) return;
   rememberButtonLabel(button);
-  button.classList.toggle("is-connected", connected);
+  button.classList.remove("is-connected");
+  button.classList.toggle("is-disconnect", connected);
   if (connected) {
     button.textContent = connectedLabel;
-    button.disabled = true;
+    button.disabled = false;
     button.setAttribute("aria-pressed", "true");
     return;
   }
@@ -200,6 +208,7 @@ function renderProfiles() {
 function setBusy(isBusy) {
   const traktConnected = Boolean(state.trakt.token?.access_token);
   const nuvioConnected = Boolean(state.nuvio.session?.access_token);
+  const syncReady = traktConnected && nuvioConnected;
   [
     dom.startTraktLogin,
     dom.loginNuvio,
@@ -208,8 +217,8 @@ function setBusy(isBusy) {
   ].forEach((button) => {
     if (!button) return;
     button.disabled = isBusy
-      || (button === dom.startTraktLogin && (traktPending || traktConnected))
-      || (button === dom.loginNuvio && nuvioConnected);
+      || (button === dom.startTraktLogin && traktPending)
+      || ((button === dom.previewSync || button === dom.runSync) && !syncReady);
   });
 }
 
@@ -624,6 +633,25 @@ async function loginNuvio() {
   updateAuthStatus();
   await loadNuvioProfiles();
   logLine("Nuvio connected.");
+}
+
+async function toggleNuvioConnection() {
+  if (state.nuvio.session?.access_token) {
+    setButtonLabel(dom.loginNuvio, "Disconnecting...");
+    await disconnectNuvio();
+    return;
+  }
+  setButtonLabel(dom.loginNuvio, "Signing in...");
+  await loginNuvio();
+}
+
+async function toggleTraktConnection() {
+  if (state.trakt.token?.access_token) {
+    setButtonLabel(dom.startTraktLogin, "Disconnecting...");
+    disconnectTrakt();
+    return;
+  }
+  await startTraktPopupLogin();
 }
 
 async function ensureNuvioAccessToken() {
@@ -1876,8 +1904,8 @@ function bind(action, handler, busyLabel = "", successLabel = "") {
   });
 }
 
-bind(dom.startTraktLogin, startTraktPopupLogin, "Opening Trakt...");
-bind(dom.loginNuvio, loginNuvio, "Signing in...");
+bind(dom.startTraktLogin, toggleTraktConnection);
+bind(dom.loginNuvio, toggleNuvioConnection);
 bind(dom.previewSync, previewSync, "Loading preview...", "Preview ready");
 bind(dom.runSync, runSync, "Syncing...", "Synced");
 bind(dom.logoutTrakt, disconnectTrakt);
