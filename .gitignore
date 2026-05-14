@@ -1,0 +1,7 @@
+node_modules/
+.env
+.env.*
+*.log
+
+_nuvio_src/
+_github_linux_fix/
