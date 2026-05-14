@@ -49,6 +49,14 @@ let pendingTraktState = null;
 let pendingTraktClientId = "";
 let traktBroadcastChannel = null;
 const PREVIEW_PAGE_SIZE = 50;
+let episodeMappingContextPromise = null;
+let episodeMappingContextKey = "";
+const addonManifestCache = new Map();
+const addonMetaCache = new Map();
+const addonEpisodeCache = new Map();
+const traktEpisodeCache = new Map();
+const episodeMappingCache = new Map();
+const normalizedEpisodeTitleCache = new Map();
 
 function defaultState() {
   return {
@@ -611,6 +619,7 @@ async function loginNuvio() {
   }
 
   state.nuvio.session = normalizeNuvioSession(data);
+  clearEpisodeMappingCaches();
   saveState();
   updateAuthStatus();
   await loadNuvioProfiles();
@@ -742,6 +751,500 @@ async function fetchAllTraktPath(path, params, label, options, fetchOptions = {}
   return all;
 }
 
+async function nuvioRest(path, params = {}) {
+  const token = await ensureNuvioAccessToken();
+  const url = new URL(`${NUVIO_BASE}/rest/v1/${path}`);
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null) {
+      url.searchParams.set(key, String(value));
+    }
+  }
+
+  const { data } = await requestJson(url.toString(), {
+    headers: {
+      apikey: NUVIO_KEY,
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+  return data;
+}
+
+function clearEpisodeMappingCaches() {
+  episodeMappingContextPromise = null;
+  episodeMappingContextKey = "";
+  addonMetaCache.clear();
+  addonEpisodeCache.clear();
+  episodeMappingCache.clear();
+}
+
+async function prepareEpisodeMapper() {
+  if (!state.nuvio.session?.access_token) {
+    logLine("Nuvio is not connected, so episode remapping is skipped for this preview.");
+    return null;
+  }
+
+  try {
+    const context = await loadEpisodeMappingContext();
+    if (!context.addons.length) {
+      logLine("No compatible Nuvio metadata addon was found, so episode remapping is skipped.");
+      return null;
+    }
+    logLine(`Loaded ${context.addons.length} Nuvio metadata addon${context.addons.length === 1 ? "" : "s"} for episode remapping.`);
+    return context;
+  } catch (error) {
+    logLine(`Episode remapping unavailable: ${error.message}`);
+    return null;
+  }
+}
+
+async function loadEpisodeMappingContext() {
+  const selectedProfileId = Number(state.nuvio.profileId || 1);
+  const profile = state.nuvio.profiles.find((item) => Number(item.profile_index || item.id || 1) === selectedProfileId);
+  const effectiveProfileId = selectedProfileId !== 1 && profile?.uses_primary_addons ? 1 : selectedProfileId;
+  const key = `${effectiveProfileId}:${state.nuvio.session?.access_token || ""}`;
+
+  if (episodeMappingContextPromise && episodeMappingContextKey === key) {
+    return episodeMappingContextPromise;
+  }
+
+  episodeMappingContextKey = key;
+  episodeMappingContextPromise = pullNuvioMetadataAddons(effectiveProfileId)
+    .then((addons) => ({ addons, effectiveProfileId }))
+    .catch((error) => {
+      episodeMappingContextPromise = null;
+      episodeMappingContextKey = "";
+      throw error;
+    });
+
+  return episodeMappingContextPromise;
+}
+
+async function pullNuvioMetadataAddons(profileId) {
+  const params = {
+    select: "url,name,sort_order,profile_id,enabled",
+    profile_id: `eq.${profileId}`,
+    order: "sort_order.asc",
+  };
+  if (state.nuvio.session?.user?.id) {
+    params.user_id = `eq.${state.nuvio.session.user.id}`;
+  }
+
+  const rows = await nuvioRest("addons", params);
+  const sortedRows = (Array.isArray(rows) ? rows : [])
+    .filter((row) => row?.url && row.enabled !== false)
+    .sort((left, right) => Number(left.sort_order || 0) - Number(right.sort_order || 0));
+
+  const addons = [];
+  for (const row of sortedRows) {
+    const addon = await fetchAddonManifest(row.url, row.name).catch(() => null);
+    if (addon && addonHasMetaResource(addon)) {
+      addons.push(addon);
+    }
+  }
+  return addons;
+}
+
+async function fetchAddonManifest(addonUrl, fallbackName) {
+  const baseUrl = canonicalizeAddonUrl(addonUrl);
+  if (!baseUrl) return null;
+  if (addonManifestCache.has(baseUrl)) {
+    return addonManifestCache.get(baseUrl);
+  }
+
+  const manifest = await fetchJsonUrl(buildAddonResourceUrl(baseUrl, "manifest.json"), 8000);
+  const addon = parseAddonManifest(manifest, baseUrl, fallbackName);
+  addonManifestCache.set(baseUrl, addon);
+  return addon;
+}
+
+async function fetchJsonUrl(url, timeoutMs = 8000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      headers: { Accept: "application/json" },
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    return await response.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function canonicalizeAddonUrl(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const queryIndex = text.indexOf("?");
+  const path = queryIndex >= 0 ? text.slice(0, queryIndex) : text;
+  const query = queryIndex >= 0 ? text.slice(queryIndex) : "";
+  const withoutManifest = path.toLowerCase().endsWith("/manifest.json")
+    ? path.slice(0, -"/manifest.json".length)
+    : path;
+  return `${withoutManifest.replace(/\/+$/, "")}${query}`;
+}
+
+function buildAddonResourceUrl(addonUrl, resourcePath) {
+  const baseUrl = canonicalizeAddonUrl(addonUrl);
+  const queryIndex = baseUrl.indexOf("?");
+  const path = queryIndex >= 0 ? baseUrl.slice(0, queryIndex) : baseUrl;
+  const query = queryIndex >= 0 ? baseUrl.slice(queryIndex) : "";
+  return `${path}/${resourcePath.replace(/^\/+/, "")}${query}`;
+}
+
+function buildAddonMetaUrl(addonUrl, type, id) {
+  return buildAddonResourceUrl(addonUrl, `meta/${encodeURIComponent(type)}/${encodeURIComponent(id)}.json`);
+}
+
+function parseAddonManifest(manifest, baseUrl, fallbackName) {
+  const rawTypes = Array.isArray(manifest?.types)
+    ? manifest.types.map((type) => String(type || "").trim()).filter(Boolean)
+    : [];
+  return {
+    baseUrl,
+    name: String(manifest?.name || fallbackName || baseUrl),
+    rawTypes,
+    resources: parseAddonResources(manifest?.resources, rawTypes),
+  };
+}
+
+function parseAddonResources(resources, fallbackTypes) {
+  if (!Array.isArray(resources)) return [];
+  return resources.map((resource) => {
+    if (typeof resource === "string") {
+      return {
+        name: resource,
+        types: fallbackTypes,
+        idPrefixes: [],
+      };
+    }
+    return {
+      name: String(resource?.name || "").trim(),
+      types: Array.isArray(resource?.types)
+        ? resource.types.map((type) => String(type || "").trim()).filter(Boolean)
+        : fallbackTypes,
+      idPrefixes: Array.isArray(resource?.idPrefixes)
+        ? resource.idPrefixes.map((prefix) => String(prefix || "").trim()).filter(Boolean)
+        : [],
+    };
+  }).filter((resource) => resource.name);
+}
+
+function addonHasMetaResource(addon) {
+  return addon.resources.some((resource) => resource.name.toLowerCase() === "meta");
+}
+
+function addonSupportsMetaType(addon, type) {
+  const normalizedType = String(type || "").trim().toLowerCase();
+  if (!normalizedType) return false;
+  return addon.resources.some((resource) => {
+    if (resource.name.toLowerCase() !== "meta") return false;
+    if (!resource.types.length) return true;
+    return resource.types.some((candidate) => candidate.toLowerCase() === normalizedType);
+  });
+}
+
+function inferCanonicalMetaType(type) {
+  const value = String(type || "").toLowerCase();
+  if (["series", "show", "tv", "episode"].includes(value)) return "series";
+  if (value === "movie") return "movie";
+  return value || "series";
+}
+
+function selectMetaAddonCandidates(addons, requestedType) {
+  const canonicalType = inferCanonicalMetaType(requestedType);
+  const candidates = [];
+  const seen = new Set();
+  const add = (addon, type) => {
+    const key = `${addon.baseUrl}|${type}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      candidates.push({ addon, type });
+    }
+  };
+
+  for (const addon of addons) {
+    if (addonSupportsMetaType(addon, requestedType)) add(addon, requestedType);
+  }
+  for (const addon of addons) {
+    if (addonSupportsMetaType(addon, canonicalType)) add(addon, canonicalType);
+  }
+  if (!candidates.length) {
+    for (const addon of addons) {
+      if (addon.rawTypes.some((type) => type.toLowerCase() === String(requestedType).toLowerCase())) {
+        add(addon, requestedType);
+      }
+    }
+  }
+  if (!candidates.length) {
+    const firstMetaAddon = addons.find(addonHasMetaResource);
+    if (firstMetaAddon) add(firstMetaAddon, requestedType);
+  }
+
+  return candidates;
+}
+
+async function fetchMetaFromAddons(context, type, id) {
+  if (!context?.addons?.length || !type || !id) return null;
+  for (const { addon, type: candidateType } of selectMetaAddonCandidates(context.addons, type)) {
+    const cacheKey = `${addon.baseUrl}|${candidateType}|${id}`;
+    let response;
+    if (addonMetaCache.has(cacheKey)) {
+      response = addonMetaCache.get(cacheKey);
+    } else {
+      response = await fetchJsonUrl(buildAddonMetaUrl(addon.baseUrl, candidateType, id), 8000)
+        .catch(() => null);
+      addonMetaCache.set(cacheKey, response);
+    }
+    if (response?.meta) return response.meta;
+  }
+  return null;
+}
+
+async function fetchSeriesMeta(contentId, contentType, context) {
+  const typeCandidates = unique([contentType, inferCanonicalMetaType(contentType), "series", "tv"]);
+  const idCandidates = unique([
+    contentId,
+    barePrefixedId(contentId, "tmdb"),
+    barePrefixedId(contentId, "trakt"),
+  ].filter(Boolean));
+
+  for (const type of typeCandidates) {
+    for (const id of idCandidates) {
+      const meta = await fetchMetaFromAddons(context, type, id);
+      if (Array.isArray(meta?.videos) && meta.videos.length) {
+        return meta;
+      }
+    }
+  }
+  return null;
+}
+
+async function getAddonEpisodes(contentId, contentType, context) {
+  const cacheKey = `${context.effectiveProfileId}|${contentType}|${contentId}`;
+  if (addonEpisodeCache.has(cacheKey)) return addonEpisodeCache.get(cacheKey);
+  const meta = await fetchSeriesMeta(contentId, contentType, context);
+  const episodes = mapAddonVideosToEpisodeEntries(meta?.videos || []);
+  addonEpisodeCache.set(cacheKey, episodes);
+  return episodes;
+}
+
+function mapAddonVideosToEpisodeEntries(videos) {
+  const seen = new Set();
+  return videos
+    .map((video) => {
+      const season = asNumber(video?.season);
+      const episode = asNumber(video?.episode ?? video?.number);
+      if (season === null || episode === null || season <= 0 || episode <= 0) return null;
+      const videoId = typeof video?.id === "string" && video.id.trim() ? video.id.trim() : null;
+      const key = videoId || `${season}:${episode}`;
+      if (seen.has(key)) return null;
+      seen.add(key);
+      return {
+        season,
+        episode,
+        title: video?.title || video?.name || `Episode ${episode}`,
+        videoId,
+      };
+    })
+    .filter(Boolean)
+    .sort(compareEpisodeEntries);
+}
+
+async function getTraktEpisodes(showLookupId) {
+  if (!showLookupId) return [];
+  if (traktEpisodeCache.has(showLookupId)) return traktEpisodeCache.get(showLookupId);
+  const { data } = await traktRequest(`/shows/${encodeURIComponent(showLookupId)}/seasons`, {
+    extended: "episodes",
+  });
+  const entries = [];
+  for (const season of Array.isArray(data) ? data : []) {
+    const seasonNumber = asNumber(season?.number);
+    if (seasonNumber === null || seasonNumber <= 0) continue;
+    for (const episode of season.episodes || []) {
+      const episodeNumber = asNumber(episode?.number ?? episode?.episode);
+      if (episodeNumber === null || episodeNumber <= 0) continue;
+      entries.push({
+        season: seasonNumber,
+        episode: episodeNumber,
+        title: episode?.title || episode?.name || null,
+        videoId: null,
+      });
+    }
+  }
+  entries.sort(compareEpisodeEntries);
+  traktEpisodeCache.set(showLookupId, entries);
+  return entries;
+}
+
+async function resolveImportedEpisodeMapping(context, params) {
+  if (!context?.addons?.length) return null;
+  const cacheKey = [
+    context.effectiveProfileId,
+    params.contentType,
+    params.contentId,
+    params.season,
+    params.episode,
+    normalizeEpisodeTitle(params.episodeTitle),
+  ].join("|");
+  if (episodeMappingCache.has(cacheKey)) return episodeMappingCache.get(cacheKey);
+
+  let mapped = null;
+  try {
+    const addonEpisodes = await getAddonEpisodes(params.contentId, params.contentType, context);
+    const showLookupId = resolveShowLookupId(params.show?.ids, params.contentId);
+    const traktEpisodes = await getTraktEpisodes(showLookupId);
+
+    if (addonEpisodes.length && traktEpisodes.length) {
+      const addonHasEpisode = addonEpisodes.some((item) => item.season === params.season && item.episode === params.episode);
+      if (!(addonHasEpisode && hasSameSeasonStructure(addonEpisodes, traktEpisodes))) {
+        mapped = reverseRemapEpisodeByTitleOrIndex({
+          requestedSeason: params.season,
+          requestedEpisode: params.episode,
+          requestedTitle: params.episodeTitle,
+          addonEpisodes,
+          traktEpisodes,
+        });
+      }
+    }
+  } catch {
+    mapped = null;
+  }
+
+  episodeMappingCache.set(cacheKey, mapped);
+  return mapped;
+}
+
+function reverseRemapEpisodeByTitleOrIndex({
+  requestedSeason,
+  requestedEpisode,
+  requestedTitle,
+  addonEpisodes,
+  traktEpisodes,
+}) {
+  return remapEpisodeBetweenLists({
+    requestedSeason,
+    requestedEpisode,
+    requestedTitle,
+    requestedVideoId: null,
+    sourceEpisodes: traktEpisodes,
+    targetEpisodes: addonEpisodes,
+  });
+}
+
+function remapEpisodeBetweenLists({
+  requestedSeason,
+  requestedEpisode,
+  requestedVideoId,
+  requestedTitle,
+  sourceEpisodes,
+  targetEpisodes,
+}) {
+  if (!sourceEpisodes.length || !targetEpisodes.length) return null;
+
+  const orderedSourceEpisodes = [...sourceEpisodes].sort(compareEpisodeEntries);
+  const orderedTargetEpisodes = [...targetEpisodes].sort(compareEpisodeEntries);
+  const currentSourceEpisode = requestedVideoId
+    ? orderedSourceEpisodes.find((item) => item.videoId === requestedVideoId)
+    : null;
+  const sourceEpisode = currentSourceEpisode
+    || orderedSourceEpisodes.find((item) => item.season === requestedSeason && item.episode === requestedEpisode);
+
+  if (!sourceEpisode) return null;
+
+  const normalizedTitle = normalizeEpisodeTitle(requestedTitle || sourceEpisode.title);
+  if (isUsefulEpisodeTitle(normalizedTitle)) {
+    const titleMatches = orderedTargetEpisodes.filter((item) => normalizeEpisodeTitle(item.title) === normalizedTitle);
+    if (titleMatches.length === 1) {
+      return titleMatches[0];
+    }
+  }
+
+  const sourceIndex = orderedSourceEpisodes.indexOf(sourceEpisode);
+  if (sourceIndex < 0 || sourceIndex >= orderedTargetEpisodes.length) return null;
+  return orderedTargetEpisodes[sourceIndex];
+}
+
+function compareEpisodeEntries(left, right) {
+  return (left.season - right.season) || (left.episode - right.episode);
+}
+
+function normalizeEpisodeTitle(title) {
+  if (title === null || title === undefined) return "";
+  const value = String(title);
+  if (normalizedEpisodeTitleCache.has(value)) return normalizedEpisodeTitleCache.get(value);
+  const normalized = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+  normalizedEpisodeTitleCache.set(value, normalized);
+  return normalized;
+}
+
+function isUsefulEpisodeTitle(title) {
+  if (!title) return false;
+  return !/^(episode|ep|e) \d+$/.test(title);
+}
+
+function hasSameSeasonStructure(leftEpisodes, rightEpisodes) {
+  const leftCounts = seasonEpisodeCounts(leftEpisodes);
+  const rightCounts = seasonEpisodeCounts(rightEpisodes);
+  if (leftCounts.size !== rightCounts.size) return false;
+  for (const [season, count] of leftCounts.entries()) {
+    if (rightCounts.get(season) !== count) return false;
+  }
+  return true;
+}
+
+function seasonEpisodeCounts(episodes) {
+  const counts = new Map();
+  for (const episode of episodes) {
+    counts.set(episode.season, (counts.get(episode.season) || 0) + 1);
+  }
+  return counts;
+}
+
+function resolveShowLookupId(ids, contentId) {
+  const lookup = lookupFromIds(ids);
+  if (lookup) return lookup;
+  const parsed = parseContentId(contentId);
+  return parsed.imdb || parsed.trakt || parsed.slug || "";
+}
+
+function lookupFromIds(ids) {
+  if (!ids) return "";
+  if (typeof ids.imdb === "string" && /^tt\d+$/i.test(ids.imdb)) return ids.imdb;
+  if (ids.trakt !== undefined && ids.trakt !== null && String(ids.trakt).trim()) return String(ids.trakt);
+  if (typeof ids.slug === "string" && ids.slug.trim()) return ids.slug.trim();
+  return "";
+}
+
+function parseContentId(value) {
+  const text = String(value || "").trim();
+  if (/^tt\d+$/i.test(text)) return { imdb: text };
+  const imdbMatch = text.match(/^imdb:(tt\d+)$/i);
+  if (imdbMatch) return { imdb: imdbMatch[1] };
+  const traktMatch = text.match(/^trakt:(?:show:|series:|tv:)?([0-9]+|[a-z0-9-]+)$/i);
+  if (traktMatch) {
+    return /^\d+$/.test(traktMatch[1]) ? { trakt: traktMatch[1] } : { slug: traktMatch[1] };
+  }
+  return {};
+}
+
+function barePrefixedId(value, prefix) {
+  const text = String(value || "").trim();
+  const expected = `${prefix}:`;
+  return text.toLowerCase().startsWith(expected) ? text.slice(expected.length) : null;
+}
+
+function unique(values) {
+  return [...new Set(values.filter(Boolean).map((value) => String(value).trim()).filter(Boolean))];
+}
+
 async function pullTraktPlan(options) {
   const remaps = parseRemaps(options.idRemaps);
   const plan = {
@@ -750,15 +1253,19 @@ async function pullTraktPlan(options) {
     library: [],
     skipped: [],
     fallbackIds: 0,
+    remappedEpisodes: 0,
   };
+  const episodeMapper = options.syncHistory || options.syncProgress
+    ? await prepareEpisodeMapper()
+    : null;
 
   if (options.syncHistory) {
     const [movies, shows] = await Promise.all([
-      fetchAllTrakt(["/users/me/watched/movies", "/sync/watched/movies"], {}, "watched movies", options, { paged: false }),
-      fetchAllTrakt(["/users/me/watched/shows", "/sync/watched/shows"], {}, "watched shows", options, { paged: false }),
+      fetchAllTrakt(["/users/me/watched/movies", "/sync/watched/movies"], { extended: "full" }, "watched movies", options, { paged: false }),
+      fetchAllTrakt(["/users/me/watched/shows", "/sync/watched/shows"], { extended: "full" }, "watched shows", options, { paged: false }),
     ]);
     plan.history.push(...mapWatchedMovies(movies, remaps, plan));
-    plan.history.push(...mapWatchedShows(shows, remaps, plan));
+    plan.history.push(...(await mapWatchedShows(shows, remaps, plan, episodeMapper)));
     plan.history = dedupeBy(plan.history, watchedKey, "watched_at");
     logLine(`Mapped ${plan.history.length} watched items for Nuvio.`);
   }
@@ -773,8 +1280,8 @@ async function pullTraktPlan(options) {
       if (!playbackEpisodes.length) playbackEpisodes = allPlayback.filter((item) => item.type === "episode" || item.episode);
     }
 
-    plan.progress.push(...mapPlayback(playbackMovies, "movie", remaps, plan, options));
-    plan.progress.push(...mapPlayback(playbackEpisodes, "episode", remaps, plan, options));
+    plan.progress.push(...(await mapPlayback(playbackMovies, "movie", remaps, plan, options, episodeMapper)));
+    plan.progress.push(...(await mapPlayback(playbackEpisodes, "episode", remaps, plan, options, episodeMapper)));
     plan.progress = dedupeBy(plan.progress, progressKey, "last_watched");
     logLine(`Mapped ${plan.progress.length} continue-watching entries for Nuvio.`);
   }
@@ -817,6 +1324,9 @@ async function pullTraktPlan(options) {
   if (plan.fallbackIds) {
     logLine(`${plan.fallbackIds} items used fallback IDs. Add remaps if Nuvio cannot resolve those titles.`);
   }
+  if (plan.remappedEpisodes) {
+    logLine(`Remapped ${plan.remappedEpisodes} episode entries with Nuvio addon episode order.`);
+  }
 
   return plan;
 }
@@ -840,7 +1350,7 @@ function mapWatchedMovies(items, remaps, plan) {
   return mapped;
 }
 
-function mapWatchedShows(items, remaps, plan) {
+async function mapWatchedShows(items, remaps, plan, episodeMapper) {
   const mapped = [];
   for (const record of items) {
     const show = record.show || record;
@@ -858,13 +1368,30 @@ function mapWatchedShows(items, remaps, plan) {
           skip(plan, show?.title || id.value, "missing season or episode number");
           continue;
         }
+        const episodeTitle = episode.title || episode.name || null;
+        const remapped = await resolveImportedEpisodeMapping(episodeMapper, {
+          contentId: id.value,
+          contentType: "series",
+          show,
+          season: seasonNumber,
+          episode: episodeNumber,
+          episodeTitle,
+        });
+        const targetSeason = remapped?.season ?? seasonNumber;
+        const targetEpisode = remapped?.episode ?? episodeNumber;
+        const targetTitle = remapped?.title || episodeTitle;
+        const wasRemapped = targetSeason !== seasonNumber || targetEpisode !== episodeNumber;
+        if (wasRemapped) plan.remappedEpisodes += 1;
         mapped.push({
           content_id: id.value,
           content_type: "series",
-          title: `${show.title || "Series"} S${pad2(seasonNumber)}E${pad2(episodeNumber)}`,
-          season: seasonNumber,
-          episode: episodeNumber,
+          title: targetTitle
+            ? `${show.title || "Series"} - ${targetTitle}`
+            : `${show.title || "Series"} S${pad2(targetSeason)}E${pad2(targetEpisode)}`,
+          season: targetSeason,
+          episode: targetEpisode,
           watched_at: toEpochMs(episode.last_watched_at || record.last_watched_at || record.last_updated_at),
+          _remapped_from: wasRemapped ? `S${pad2(seasonNumber)}E${pad2(episodeNumber)}` : null,
         });
       }
     }
@@ -872,7 +1399,7 @@ function mapWatchedShows(items, remaps, plan) {
   return mapped;
 }
 
-function mapPlayback(items, forcedType, remaps, plan, options) {
+async function mapPlayback(items, forcedType, remaps, plan, options, episodeMapper) {
   const mapped = [];
   for (const entry of items) {
     const type = forcedType || entry.type;
@@ -922,16 +1449,33 @@ function mapPlayback(items, forcedType, remaps, plan, options) {
       skip(plan, episode?.title || id.value, "missing episode runtime");
       continue;
     }
+    const episodeTitle = episode?.title || episode?.name || null;
+    const remapped = await resolveImportedEpisodeMapping(episodeMapper, {
+      contentId: id.value,
+      contentType: "series",
+      show,
+      season: seasonNumber,
+      episode: episodeNumber,
+      episodeTitle,
+    });
+    const targetSeason = remapped?.season ?? seasonNumber;
+    const targetEpisode = remapped?.episode ?? episodeNumber;
+    const targetTitle = remapped?.title || episodeTitle;
+    const wasRemapped = targetSeason !== seasonNumber || targetEpisode !== episodeNumber;
+    if (wasRemapped) plan.remappedEpisodes += 1;
     mapped.push({
       content_id: id.value,
       content_type: "series",
-      video_id: `${id.value}:${seasonNumber}:${episodeNumber}`,
-      season: seasonNumber,
-      episode: episodeNumber,
+      video_id: remapped?.videoId || `${id.value}:${targetSeason}:${targetEpisode}`,
+      season: targetSeason,
+      episode: targetEpisode,
       position: clamp(Math.round(duration * (progress / 100)), 1, Math.max(1, duration - 1000)),
       duration,
       last_watched: toEpochMs(entry.paused_at || entry.watched_at || entry.updated_at),
-      _title: `${show?.title || "Series"} S${pad2(seasonNumber)}E${pad2(episodeNumber)}`,
+      _title: targetTitle
+        ? `${show?.title || "Series"} - ${targetTitle}`
+        : `${show?.title || "Series"} S${pad2(targetSeason)}E${pad2(targetEpisode)}`,
+      _remapped_from: wasRemapped ? `S${pad2(seasonNumber)}E${pad2(episodeNumber)}` : null,
     });
   }
   return mapped;
@@ -1299,6 +1843,7 @@ async function disconnectNuvio() {
   }
   state.nuvio.session = null;
   state.nuvio.profiles = [];
+  clearEpisodeMappingCaches();
   saveState();
   renderProfiles();
   updateAuthStatus();
