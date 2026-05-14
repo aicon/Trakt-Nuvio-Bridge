@@ -818,7 +818,7 @@ async function prepareEpisodeMapper() {
       logLine("No compatible Nuvio metadata addon was found, so episode remapping is skipped.");
       return null;
     }
-    logLine(`Loaded ${context.addons.length} Nuvio metadata addon${context.addons.length === 1 ? "" : "s"} for episode remapping.`);
+    logLine(`Using Nuvio metadata addon for episode remapping: ${context.addons[0].name}.`);
     return context;
   } catch (error) {
     logLine(`Episode remapping unavailable: ${error.message}`);
@@ -863,14 +863,13 @@ async function pullNuvioMetadataAddons(profileId) {
     .filter((row) => row?.url && row.enabled !== false)
     .sort((left, right) => Number(left.sort_order || 0) - Number(right.sort_order || 0));
 
-  const addons = [];
   for (const row of sortedRows) {
     const addon = await fetchAddonManifest(row.url, row.name).catch(() => null);
     if (addon && addonHasMetaResource(addon)) {
-      addons.push(addon);
+      return [addon];
     }
   }
-  return addons;
+  return [];
 }
 
 async function fetchAddonManifest(addonUrl, fallbackName) {
