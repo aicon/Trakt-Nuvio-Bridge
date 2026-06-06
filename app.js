@@ -1506,7 +1506,7 @@ function findAddonEpisodeMatch(addonEpisodes, season, episode, title) {
   return titleMatches.length === 1 ? titleMatches[0] : null;
 }
 
-async function resolveEpisodeWatchTargets(context, params, remaps) {
+async function resolveEpisodeWatchTargets(context, params, remaps, plan) {
   const traktSeason = params.season;
   const traktEpisode = params.episode;
   const seriesId = resolveNuvioSeriesContentId(params.show?.ids, remaps, plan);
@@ -1534,10 +1534,10 @@ async function resolveEpisodeWatchTargets(context, params, remaps) {
   return buildNuvioEpisodeFallback(context, {
     ...params,
     contentId,
-  }, remaps);
+  }, remaps, plan);
 }
 
-function buildNuvioEpisodeFallback(context, params, remaps) {
+function buildNuvioEpisodeFallback(context, params, remaps, plan) {
   const seriesId = resolveNuvioSeriesContentId(params.show?.ids, remaps, plan);
   const contentId = seriesId?.value || params.contentId;
   const normalized = normalizeEpisodeNumbers(params.season, params.episode);
@@ -1711,7 +1711,7 @@ async function mapWatchedShows(items, remaps, plan, episodeMapper) {
           season: seasonNumber,
           episode: episodeNumber,
           episodeTitle,
-        }, remaps);
+        }, remaps, plan);
         const wasRemapped = targets.remapped;
         if (wasRemapped) plan.remappedEpisodes += 1;
         mapped.push({
@@ -1789,7 +1789,7 @@ async function mapPlayback(items, forcedType, remaps, plan, options, episodeMapp
       season: seasonNumber,
       episode: episodeNumber,
       episodeTitle,
-    }, remaps);
+    }, remaps, plan);
     const wasRemapped = targets.remapped;
     if (wasRemapped) plan.remappedEpisodes += 1;
     mapped.push({
