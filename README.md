@@ -2,6 +2,8 @@
 
 Standalone static web tool for importing Trakt watched history, playback progress, watchlist, and collection data into Nuvio Sync.
 Public website: https://trakt-nuvio.duckdns.org/
+
+Magyar dokumentáció: [docs/](./docs/README.md)
 ## Privacy model
 
 - The sync work runs in the user's browser.
