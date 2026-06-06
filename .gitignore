@@ -1,6 +1,7 @@
 node_modules/
 .env
 .env.*
+!.env.example
 *.log
 
 _nuvio_src/
