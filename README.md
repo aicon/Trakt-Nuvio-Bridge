@@ -45,6 +45,25 @@ Then open `http://127.0.0.1:4173/`.
 
 When `TRAKT_CLIENT_ID` is set, `server.js` serves the browser config automatically. The public client ID is not preloaded into the page; it is returned by the login endpoint after the user presses `Connect Trakt`.
 
+## Run with Docker Compose
+
+```bash
+git clone https://github.com/aicon/Trakt-Nuvio-Bridge.git
+cd Trakt-Nuvio-Bridge
+cp .env.example .env
+# edit .env with your Trakt OAuth values and NAS URL
+
+docker compose up -d --build
+```
+
+Open `http://<your-host>:4173/` (or the port set in `HOST_PORT`).
+
+Use the same public URL in both `TRAKT_REDIRECT_URI` and `TRAKT_CALLBACK_ORIGIN`. If nginx terminates HTTPS in front of the container, point both variables at the public `https://` URL and proxy to `127.0.0.1:4173`.
+
+```bash
+docker compose logs -f trakt-nuvio-bridge
+docker compose down
+```
 
 ## ID mapping notes
 
