@@ -1101,7 +1101,7 @@ async function getAddonEpisodes(contentId, contentType, context) {
     noteEpisodeRemapFallback(
       context,
       "metadata",
-      `addon metadata was unavailable or timed out for ${contentId}; using Trakt numbering for that show.`,
+      `addon metadata was unavailable or timed out for ${contentId}; using Nuvio-compatible TMDB numbering for that show.`,
     );
   }
   return episodes;
@@ -1142,7 +1142,7 @@ async function getTraktEpisodes(showLookupId, context) {
     noteEpisodeRemapFallback(
       context,
       "trakt",
-      `Trakt episode lookup was unavailable or timed out for ${showLookupId}; using Trakt numbering for that show.`,
+      `Trakt episode lookup was unavailable or timed out for ${showLookupId}; using Nuvio-compatible TMDB numbering for that show.`,
     );
     traktEpisodeCache.set(showLookupId, []);
     return [];
@@ -1168,8 +1168,6 @@ async function getTraktEpisodes(showLookupId, context) {
 }
 
 async function resolveImportedEpisodeMapping(context, params) {
-  if (!context?.addons?.length) return null;
-  if (!episodeMapperCanContinue(context)) return null;
   const cacheKey = [
     context.effectiveProfileId,
     params.contentType,
@@ -1180,13 +1178,34 @@ async function resolveImportedEpisodeMapping(context, params) {
   ].join("|");
   if (episodeMappingCache.has(cacheKey)) return episodeMappingCache.get(cacheKey);
 
+  const canRemap = Boolean(context?.addons?.length && episodeMapperCanContinue(context));
+  if (!canRemap) {
+    episodeMappingCache.set(cacheKey, null);
+    return null;
+  }
+
   let mapped = null;
   try {
     const addonEpisodes = await getAddonEpisodes(params.contentId, params.contentType, context);
-    if (!episodeMapperCanContinue(context)) return null;
+    if (!episodeMapperCanContinue(context)) {
+      mapped = findAddonEpisodeMatch(addonEpisodes, params.season, params.episode, params.episodeTitle);
+      episodeMappingCache.set(cacheKey, mapped);
+      return mapped;
+    }
+
+    const directAddon = findAddonEpisodeMatch(addonEpisodes, params.season, params.episode, params.episodeTitle);
+    if (directAddon) {
+      episodeMappingCache.set(cacheKey, directAddon);
+      return directAddon;
+    }
+
     const showLookupId = resolveShowLookupId(params.show?.ids, params.contentId);
     const traktEpisodes = await getTraktEpisodes(showLookupId, context);
-    if (!episodeMapperCanContinue(context)) return null;
+    if (!episodeMapperCanContinue(context)) {
+      mapped = findAddonEpisodeMatch(addonEpisodes, params.season, params.episode, params.episodeTitle);
+      episodeMappingCache.set(cacheKey, mapped);
+      return mapped;
+    }
 
     let triedRemap = false;
     if (addonEpisodes.length && traktEpisodes.length) {
@@ -1201,19 +1220,30 @@ async function resolveImportedEpisodeMapping(context, params) {
           traktEpisodes,
         });
       }
+    } else if (addonEpisodes.length) {
+      triedRemap = true;
+      mapped = remapEpisodeBetweenLists({
+        requestedSeason: params.season,
+        requestedEpisode: params.episode,
+        requestedTitle: params.episodeTitle,
+        requestedVideoId: null,
+        sourceEpisodes: [{ season: params.season, episode: params.episode, title: params.episodeTitle, videoId: null }],
+        targetEpisodes: addonEpisodes,
+      }) || findAddonEpisodeMatch(addonEpisodes, params.season, params.episode, params.episodeTitle);
     }
+
     if (triedRemap && !mapped) {
       noteEpisodeRemapFallback(
         context,
         "unmapped",
-        `no confident remap for ${params.show?.title || params.contentId} S${pad2(params.season)}E${pad2(params.episode)}; using Trakt numbering.`,
+        `no confident remap for ${params.show?.title || params.contentId} S${pad2(params.season)}E${pad2(params.episode)}; using Nuvio-compatible TMDB numbering.`,
       );
     }
   } catch {
     noteEpisodeRemapFallback(
       context,
       "error",
-      `unexpected remap error for ${params.show?.title || params.contentId} S${pad2(params.season)}E${pad2(params.episode)}; using Trakt numbering.`,
+      `unexpected remap error for ${params.show?.title || params.contentId} S${pad2(params.season)}E${pad2(params.episode)}; using Nuvio-compatible TMDB numbering.`,
     );
     mapped = null;
   }
@@ -1248,7 +1278,7 @@ function logEpisodeRemapFallbackSummary(context) {
   ]
     .filter(([key]) => stats[key])
     .map(([key, label]) => `${stats[key]} ${label}`);
-  logLine(`Episode remapping fallback summary: ${parts.join(", ")}. Affected items used original Trakt numbering.`);
+  logLine(`Episode remapping fallback summary: ${parts.join(", ")}. Affected items used Nuvio-compatible TMDB numbering where possible.`);
 }
 
 function episodeMapperCanContinue(context) {
@@ -1264,7 +1294,7 @@ function episodeMapperCanContinue(context) {
     context.timeoutLogged = true;
     context.fallbackStats ||= {};
     context.fallbackStats.budget = (context.fallbackStats.budget || 0) + 1;
-    logLine(`Episode remapping exceeded the ${Math.round(budgetMs / 1000)}s guard. Continuing this sync without remapping the remaining episodes.`);
+    logLine(`Episode remapping exceeded the ${Math.round(budgetMs / 1000)}s guard. Remaining episodes will use cached addon data or Nuvio-compatible TMDB numbering.`);
   }
   return false;
 }
@@ -1396,6 +1426,150 @@ function unique(values) {
   return [...new Set(values.filter(Boolean).map((value) => String(value).trim()).filter(Boolean))];
 }
 
+function movieIdentityKey(ids = {}) {
+  const tmdb = ids.tmdb;
+  if (tmdb !== undefined && tmdb !== null && String(tmdb).trim()) {
+    return `tmdb:${String(tmdb).trim()}`;
+  }
+  const trakt = ids.trakt;
+  if (trakt !== undefined && trakt !== null && String(trakt).trim()) {
+    return `trakt:${String(trakt).trim()}`;
+  }
+  const imdb = String(ids.imdb || "").trim();
+  if (/^tt\d+$/i.test(imdb)) {
+    return imdb;
+  }
+  return null;
+}
+
+function movieWatchedAtMs(item) {
+  const movie = item?.movie || item || {};
+  return toEpochMs(item?.last_watched_at || item?.watched_at || item?.last_updated_at || movie.last_watched_at);
+}
+
+function dedupeTraktMovies(items) {
+  const byKey = new Map();
+  const unkeyed = [];
+  for (const item of items) {
+    const movie = item.movie || item;
+    const key = movieIdentityKey(movie?.ids);
+    if (!key) {
+      unkeyed.push(item);
+      continue;
+    }
+    const watchedAt = movieWatchedAtMs(item);
+    const existing = byKey.get(key);
+    if (!existing || watchedAt >= existing.watchedAt) {
+      byKey.set(key, { item, watchedAt });
+    }
+  }
+  return [...byKey.values()].map((entry) => entry.item).concat(unkeyed);
+}
+
+function resolveNuvioSeriesContentId(ids, remaps, plan) {
+  const tmdb = ids?.tmdb;
+  if (tmdb !== undefined && tmdb !== null && String(tmdb).trim()) {
+    const value = `tmdb:${String(tmdb).trim()}`;
+    for (const key of [value, `tmdb:${tmdb}`, `trakt:show:${ids?.trakt}`]) {
+      if (key && remaps[key]) {
+        return { value: remaps[key], fallback: false, remapped: true };
+      }
+    }
+    return { value, fallback: false };
+  }
+  return resolveContentId(ids, "show", remaps, plan);
+}
+
+function normalizeEpisodeNumbers(season, episode) {
+  const normalizedSeason = asNumber(season);
+  const normalizedEpisode = asNumber(episode);
+  return {
+    season: normalizedSeason === null ? 0 : normalizedSeason,
+    episode: normalizedEpisode === null ? 0 : normalizedEpisode,
+  };
+}
+
+function getCachedAddonEpisodes(contentId, contentType, context) {
+  if (!context) return [];
+  const cacheKey = `${context.effectiveProfileId}|${contentType}|${contentId}`;
+  return addonEpisodeCache.get(cacheKey) || [];
+}
+
+function findAddonEpisodeMatch(addonEpisodes, season, episode, title) {
+  if (!Array.isArray(addonEpisodes) || !addonEpisodes.length) return null;
+  const direct = addonEpisodes.find((item) => item.season === season && item.episode === episode);
+  if (direct) return direct;
+
+  const normalizedTitle = normalizeEpisodeTitle(title);
+  if (!isUsefulEpisodeTitle(normalizedTitle)) return null;
+  const titleMatches = addonEpisodes.filter((item) => normalizeEpisodeTitle(item.title) === normalizedTitle);
+  return titleMatches.length === 1 ? titleMatches[0] : null;
+}
+
+async function resolveEpisodeWatchTargets(context, params, remaps) {
+  const traktSeason = params.season;
+  const traktEpisode = params.episode;
+  const seriesId = resolveNuvioSeriesContentId(params.show?.ids, remaps, plan);
+  const contentId = seriesId?.value || params.contentId;
+  let remapped = null;
+
+  if (context?.addons?.length) {
+    remapped = await resolveImportedEpisodeMapping(context, {
+      ...params,
+      contentId,
+    });
+  }
+
+  if (remapped) {
+    return {
+      contentId,
+      season: remapped.season,
+      episode: remapped.episode,
+      title: remapped.title || params.episodeTitle,
+      videoId: remapped.videoId || null,
+      remapped: remapped.season !== traktSeason || remapped.episode !== traktEpisode,
+    };
+  }
+
+  return buildNuvioEpisodeFallback(context, {
+    ...params,
+    contentId,
+  }, remaps);
+}
+
+function buildNuvioEpisodeFallback(context, params, remaps) {
+  const seriesId = resolveNuvioSeriesContentId(params.show?.ids, remaps, plan);
+  const contentId = seriesId?.value || params.contentId;
+  const normalized = normalizeEpisodeNumbers(params.season, params.episode);
+  const cachedEpisodes = getCachedAddonEpisodes(contentId, params.contentType, context);
+  const addonMatch = findAddonEpisodeMatch(
+    cachedEpisodes,
+    normalized.season,
+    normalized.episode,
+    params.episodeTitle,
+  );
+
+  if (addonMatch) {
+    return {
+      contentId,
+      season: addonMatch.season,
+      episode: addonMatch.episode,
+      title: addonMatch.title || params.episodeTitle,
+      videoId: addonMatch.videoId || null,
+      remapped: addonMatch.season !== params.season || addonMatch.episode !== params.episode,
+    };
+  }
+
+  return {
+    contentId,
+    season: normalized.season,
+    episode: normalized.episode,
+    title: params.episodeTitle,
+    videoId: null,
+    remapped: false,
+  };
+}
+
 async function pullTraktPlan(options) {
   const remaps = parseRemaps(options.idRemaps);
   const plan = {
@@ -1415,7 +1589,11 @@ async function pullTraktPlan(options) {
       fetchAllTrakt(["/users/me/watched/movies", "/sync/watched/movies"], { extended: "full" }, "watched movies", options, { paged: false }),
       fetchAllTrakt(["/users/me/watched/shows", "/sync/watched/shows"], { extended: "full" }, "watched shows", options, { paged: false }),
     ]);
-    plan.history.push(...mapWatchedMovies(movies, remaps, plan));
+    const uniqueMovies = dedupeTraktMovies(movies);
+    if (uniqueMovies.length !== movies.length) {
+      logLine(`Deduplicated watched movies from ${movies.length} to ${uniqueMovies.length} unique titles by TMDB/Trakt ID.`);
+    }
+    plan.history.push(...mapWatchedMovies(uniqueMovies, remaps, plan));
     plan.history.push(...(await mapWatchedShows(shows, remaps, plan, episodeMapper)));
     plan.history = dedupeBy(plan.history, watchedKey, "watched_at");
     logLine(`Mapped ${plan.history.length} watched items for Nuvio.`);
@@ -1485,6 +1663,7 @@ async function pullTraktPlan(options) {
 
 function mapWatchedMovies(items, remaps, plan) {
   const mapped = [];
+  const seenContentIds = new Set();
   for (const item of items) {
     const movie = item.movie || item;
     const id = resolveContentId(movie?.ids, "movie", remaps, plan);
@@ -1492,6 +1671,10 @@ function mapWatchedMovies(items, remaps, plan) {
       skip(plan, movie?.title || "movie", "missing movie ID");
       continue;
     }
+    if (seenContentIds.has(id.value)) {
+      continue;
+    }
+    seenContentIds.add(id.value);
     mapped.push({
       content_id: id.value,
       content_type: "movie",
@@ -1506,8 +1689,8 @@ async function mapWatchedShows(items, remaps, plan, episodeMapper) {
   const mapped = [];
   for (const record of items) {
     const show = record.show || record;
-    const id = resolveContentId(show?.ids, "show", remaps, plan);
-    if (!id) {
+    const seriesId = resolveNuvioSeriesContentId(show?.ids, remaps, plan);
+    if (!seriesId) {
       skip(plan, show?.title || "show", "missing show ID");
       continue;
     }
@@ -1517,31 +1700,28 @@ async function mapWatchedShows(items, remaps, plan, episodeMapper) {
         const seasonNumber = asNumber(season.number);
         const episodeNumber = asNumber(episode.number);
         if (seasonNumber === null || episodeNumber === null) {
-          skip(plan, show?.title || id.value, "missing season or episode number");
+          skip(plan, show?.title || seriesId.value, "missing season or episode number");
           continue;
         }
         const episodeTitle = episode.title || episode.name || null;
-        const remapped = await resolveImportedEpisodeMapping(episodeMapper, {
-          contentId: id.value,
+        const targets = await resolveEpisodeWatchTargets(episodeMapper, {
+          contentId: seriesId.value,
           contentType: "series",
           show,
           season: seasonNumber,
           episode: episodeNumber,
           episodeTitle,
-        });
-        const targetSeason = remapped?.season ?? seasonNumber;
-        const targetEpisode = remapped?.episode ?? episodeNumber;
-        const targetTitle = remapped?.title || episodeTitle;
-        const wasRemapped = targetSeason !== seasonNumber || targetEpisode !== episodeNumber;
+        }, remaps);
+        const wasRemapped = targets.remapped;
         if (wasRemapped) plan.remappedEpisodes += 1;
         mapped.push({
-          content_id: id.value,
+          content_id: targets.contentId,
           content_type: "series",
-          title: targetTitle
-            ? `${show.title || "Series"} - ${targetTitle}`
-            : `${show.title || "Series"} S${pad2(targetSeason)}E${pad2(targetEpisode)}`,
-          season: targetSeason,
-          episode: targetEpisode,
+          title: targets.title
+            ? `${show.title || "Series"} - ${targets.title}`
+            : `${show.title || "Series"} S${pad2(targets.season)}E${pad2(targets.episode)}`,
+          season: targets.season,
+          episode: targets.episode,
           watched_at: toEpochMs(episode.last_watched_at || record.last_watched_at || record.last_updated_at),
           _remapped_from: wasRemapped ? `S${pad2(seasonNumber)}E${pad2(episodeNumber)}` : null,
         });
@@ -1589,44 +1769,41 @@ async function mapPlayback(items, forcedType, remaps, plan, options, episodeMapp
 
     const episode = entry.episode;
     const show = entry.show;
-    const id = resolveContentId(show?.ids, "show", remaps, plan);
+    const seriesId = resolveNuvioSeriesContentId(show?.ids, remaps, plan);
     const seasonNumber = asNumber(episode?.season);
     const episodeNumber = asNumber(episode?.number);
-    if (!id || seasonNumber === null || episodeNumber === null) {
+    if (!seriesId || seasonNumber === null || episodeNumber === null) {
       skip(plan, show?.title || episode?.title || "episode progress", "missing show ID or episode number");
       continue;
     }
     const duration = durationMs(episode?.runtime || show?.runtime, options.estimateDuration ? 45 : 0);
     if (!duration) {
-      skip(plan, episode?.title || id.value, "missing episode runtime");
+      skip(plan, episode?.title || seriesId.value, "missing episode runtime");
       continue;
     }
     const episodeTitle = episode?.title || episode?.name || null;
-    const remapped = await resolveImportedEpisodeMapping(episodeMapper, {
-      contentId: id.value,
+    const targets = await resolveEpisodeWatchTargets(episodeMapper, {
+      contentId: seriesId.value,
       contentType: "series",
       show,
       season: seasonNumber,
       episode: episodeNumber,
       episodeTitle,
-    });
-    const targetSeason = remapped?.season ?? seasonNumber;
-    const targetEpisode = remapped?.episode ?? episodeNumber;
-    const targetTitle = remapped?.title || episodeTitle;
-    const wasRemapped = targetSeason !== seasonNumber || targetEpisode !== episodeNumber;
+    }, remaps);
+    const wasRemapped = targets.remapped;
     if (wasRemapped) plan.remappedEpisodes += 1;
     mapped.push({
-      content_id: id.value,
+      content_id: targets.contentId,
       content_type: "series",
-      video_id: remapped?.videoId || `${id.value}:${targetSeason}:${targetEpisode}`,
-      season: targetSeason,
-      episode: targetEpisode,
+      video_id: targets.videoId || `${targets.contentId}:${targets.season}:${targets.episode}`,
+      season: targets.season,
+      episode: targets.episode,
       position: clamp(Math.round(duration * (progress / 100)), 1, Math.max(1, duration - 1000)),
       duration,
       last_watched: toEpochMs(entry.paused_at || entry.watched_at || entry.updated_at),
-      _title: targetTitle
-        ? `${show?.title || "Series"} - ${targetTitle}`
-        : `${show?.title || "Series"} S${pad2(targetSeason)}E${pad2(targetEpisode)}`,
+      _title: targets.title
+        ? `${show?.title || "Series"} - ${targets.title}`
+        : `${show?.title || "Series"} S${pad2(targets.season)}E${pad2(targets.episode)}`,
       _remapped_from: wasRemapped ? `S${pad2(seasonNumber)}E${pad2(episodeNumber)}` : null,
     });
   }
