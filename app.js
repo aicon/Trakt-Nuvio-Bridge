@@ -195,6 +195,16 @@ function allowedTraktOrigins() {
   return [...new Set([location.origin, traktCallbackOrigin()].filter(Boolean))];
 }
 
+function isAllowedTraktOrigin(origin) {
+  if (!origin) return true;
+  if (allowedTraktOrigins().includes(origin)) return true;
+  try {
+    return new URL(origin).host === new URL(location.origin).host;
+  } catch {
+    return false;
+  }
+}
+
 function renderProfiles() {
   const profiles = state.nuvio.profiles?.length
     ? state.nuvio.profiles
@@ -405,12 +415,17 @@ async function startTraktPopupLogin() {
       }
       if (popup.closed) {
         window.clearInterval(popupWatcher);
-        traktPending = false;
-        pendingTraktState = null;
-        pendingTraktClientId = "";
-        restoreButtonLabel(dom.startTraktLogin);
-        setBusy(false);
-        logLine("Trakt sign in window closed before finishing.");
+        window.setTimeout(() => {
+          if (!traktPending || state.trakt.token?.access_token) {
+            return;
+          }
+          traktPending = false;
+          pendingTraktState = null;
+          pendingTraktClientId = "";
+          restoreButtonLabel(dom.startTraktLogin);
+          setBusy(false);
+          logLine("Trakt sign in window closed before finishing.");
+        }, 2500);
       }
     }, 700);
     logLine("Approve access in the Trakt popup. This page will update automatically.");
@@ -487,7 +502,8 @@ function normalizeTraktOauthPayload(rawPayload) {
 function handleTraktOauthPayload(rawPayload, origin = "") {
   const payload = normalizeTraktOauthPayload(rawPayload);
   if (!payload || payload.source !== "trakt-oauth") return;
-  if (origin && !allowedTraktOrigins().includes(origin)) return;
+  const stateMatches = Boolean(pendingTraktState && payload.state === pendingTraktState);
+  if (origin && !isAllowedTraktOrigin(origin) && !stateMatches) return;
 
   traktPending = false;
   restoreButtonLabel(dom.startTraktLogin);
