@@ -87,22 +87,74 @@ function defaultState() {
 }
 
 function loadState() {
-  clearStoredBridgeData();
-  return defaultState();
+  const base = defaultState();
+  try {
+    const prefsRaw = localStorage.getItem(PREFS_KEY);
+    if (prefsRaw) {
+      const prefs = JSON.parse(prefsRaw);
+      if (prefs?.options && typeof prefs.options === "object" && !Array.isArray(prefs.options)) {
+        base.options = { ...base.options, ...prefs.options };
+      }
+    }
+  } catch {}
+
+  try {
+    const sessionRaw = localStorage.getItem(SESSION_KEY) || sessionStorage.getItem(SESSION_KEY);
+    if (sessionRaw) {
+      const saved = JSON.parse(sessionRaw);
+      if (saved?.trakt?.token?.access_token) {
+        base.trakt.token = normalizeTraktToken(saved.trakt.token);
+        base.trakt.clientId = normalizeTraktClientId(saved.trakt.clientId) || base.trakt.clientId;
+      }
+      if (saved?.nuvio?.session?.access_token) {
+        base.nuvio.session = normalizeNuvioSession(saved.nuvio.session);
+        base.nuvio.profiles = Array.isArray(saved.nuvio.profiles) ? saved.nuvio.profiles : [];
+        base.nuvio.profileId = Number(saved.nuvio.profileId || 1);
+      }
+    }
+  } catch {}
+
+  try {
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
+    sessionStorage.removeItem(SESSION_KEY);
+  } catch {}
+
+  return base;
 }
 
 function saveState() {
-  clearStoredBridgeData();
-}
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify({ options: state.options }));
+  } catch (error) {
+    console.warn("Could not save bridge preferences.", error);
+  }
 
-function clearStoredBridgeData() {
   try {
-    localStorage.removeItem(PREFS_KEY);
-    localStorage.removeItem(LEGACY_STORAGE_KEY);
-  } catch {}
-  try {
-    sessionStorage.removeItem(SESSION_KEY);
-  } catch {}
+    const hasTrakt = Boolean(state.trakt.token?.access_token);
+    const hasNuvio = Boolean(state.nuvio.session?.access_token);
+    if (!hasTrakt && !hasNuvio) {
+      localStorage.removeItem(SESSION_KEY);
+      return;
+    }
+
+    localStorage.setItem(SESSION_KEY, JSON.stringify({
+      trakt: hasTrakt
+        ? {
+          token: state.trakt.token,
+          clientId: state.trakt.clientId || "",
+        }
+        : null,
+      nuvio: hasNuvio
+        ? {
+          session: state.nuvio.session,
+          profiles: state.nuvio.profiles || [],
+          profileId: Number(state.nuvio.profileId || 1),
+        }
+        : null,
+    }));
+  } catch (error) {
+    console.warn("Could not save bridge session.", error);
+  }
 }
 
 function hydrateForm() {
@@ -114,6 +166,41 @@ function hydrateForm() {
   updateAuthStatus();
   clearLog();
   logLine("Ready. Connect Trakt and Nuvio, then preview before syncing.");
+  void restorePersistedSessions();
+}
+
+async function restorePersistedSessions() {
+  let restoredTrakt = false;
+  let restoredNuvio = false;
+
+  if (state.trakt.token?.access_token) {
+    try {
+      await ensureTraktAccessToken();
+      restoredTrakt = true;
+      logLine("Restored saved Trakt connection.");
+      updateAuthStatus();
+    } catch (error) {
+      logLine(`Saved Trakt session could not be refreshed: ${error.message}`);
+      disconnectTrakt();
+    }
+  }
+
+  if (state.nuvio.session?.access_token) {
+    try {
+      await ensureNuvioAccessToken();
+      await loadNuvioProfiles();
+      restoredNuvio = true;
+      logLine("Restored saved Nuvio connection.");
+      updateAuthStatus();
+    } catch (error) {
+      logLine(`Saved Nuvio session could not be refreshed: ${error.message}`);
+      await disconnectNuvio();
+    }
+  }
+
+  if (restoredTrakt || restoredNuvio) {
+    toast("Saved sign-in restored.");
+  }
 }
 
 function readOptions() {

@@ -8,8 +8,8 @@ Public website: https://trakt-nuvio.duckdns.org/
 - Tiny Trakt OAuth endpoints are required for a real website so the Trakt app secret stays server-side.
 - The page calls Nuvio directly from the user's browser.
 - Nuvio email/password are only used in the browser for the Nuvio Supabase auth request and are never stored by this tool.
-- Trakt and Nuvio session tokens only live in memory while the page is open. Refreshing the page disconnects both accounts.
-- The bridge does not create cookies and does not save UI preferences in `localStorage` or `sessionStorage`; old bridge storage keys are cleared on load.
+- Trakt and Nuvio session tokens are saved in this browser's `localStorage` after you connect, so refresh and restarts keep you signed in until you disconnect or the refresh token expires.
+- Sync options are saved in `localStorage` as well. Nuvio email/password are never stored.
 - There is no analytics, bridge database, log upload, or telemetry.
 
 If you host this publicly, serve it over HTTPS and avoid adding third-party scripts. Whoever controls the hosted JavaScript could change what the browser sends, so the safest deployment is a static host you control.
