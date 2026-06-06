@@ -1,4 +1,5 @@
 import http from "node:http";
+import crypto from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,11 +23,11 @@ const server = http.createServer(async (request, response) => {
   try {
     const url = new URL(request.url || "/", `http://${request.headers.host}`);
     if (url.pathname === "/api/trakt/login-url" && request.method === "POST") {
-      await handleLoginUrl(response);
+      await handleLoginUrl(request, response);
       return;
     }
     if (url.pathname === "/api/trakt/callback" && request.method === "GET") {
-      await handleCallback(url, response);
+      await handleCallback(url, request, response);
       return;
     }
     if (url.pathname === "/api/trakt/refresh" && request.method === "POST") {
@@ -34,7 +35,7 @@ const server = http.createServer(async (request, response) => {
       return;
     }
     if (url.pathname === "/config.js" && process.env.TRAKT_CLIENT_ID) {
-      serveRuntimeConfig(response);
+      serveRuntimeConfig(request, response);
       return;
     }
     await serveStatic(url.pathname, response);
@@ -47,10 +48,12 @@ server.listen(port, host, () => {
   console.log(`Nuvio Trakt Bridge running at http://${host}:${port}/`);
 });
 
-async function handleLoginUrl(response) {
+async function handleLoginUrl(request, response) {
   const { clientId, redirectUri } = traktConfig();
+  const body = await readJsonBody(request);
+  const returnOrigin = resolveCallbackOrigin(request, body.return_origin);
   const state = crypto.randomUUID();
-  rememberOauthState(state);
+  rememberOauthState(state, returnOrigin);
   const url = new URL("https://trakt.tv/oauth/authorize");
   url.searchParams.set("response_type", "code");
   url.searchParams.set("client_id", clientId);
@@ -59,12 +62,14 @@ async function handleLoginUrl(response) {
   json(response, 200, { url: url.toString(), state, client_id: clientId });
 }
 
-async function handleCallback(url, response) {
+async function handleCallback(url, request, response) {
   const { clientId, clientSecret, redirectUri } = traktConfig();
   const code = url.searchParams.get("code");
   const error = url.searchParams.get("error");
   const state = url.searchParams.get("state") || "";
-  if (!consumeOauthState(state)) {
+  const oauthEntry = consumeOauthState(state);
+  const callbackOrigin = resolveCallbackOrigin(request, oauthEntry?.returnOrigin);
+  if (!oauthEntry) {
     html(response, callbackHtml({
       source: "trakt-oauth",
       status: "error",
@@ -72,7 +77,7 @@ async function handleCallback(url, response) {
       client_id: clientId,
       error: "invalid_state",
       error_description: "The Trakt authorization state was missing or expired. Please close this popup and connect again.",
-    }));
+    }, callbackOrigin));
     return;
   }
   if (error || !code) {
@@ -83,7 +88,7 @@ async function handleCallback(url, response) {
       client_id: clientId,
       error: error || "missing_code",
       error_description: url.searchParams.get("error_description") || "",
-    }));
+    }, callbackOrigin));
     return;
   }
 
@@ -115,7 +120,7 @@ async function handleCallback(url, response) {
     tokens: traktResponse.ok ? payload : undefined,
     error: tokenError?.error,
     error_description: tokenError?.error_description,
-  }));
+  }, callbackOrigin));
 }
 
 async function handleRefresh(request, response) {
@@ -154,15 +159,17 @@ async function serveStatic(pathname, response) {
   response.end(content);
 }
 
-function callbackHtml(payload) {
-  const targetOrigin = process.env.TRAKT_CALLBACK_ORIGIN || `http://${host}:${port}`;
+function callbackHtml(payload, targetOrigin = "*") {
   const jsonPayload = JSON.stringify(payload).replace(/</g, "\\u003c");
+  const serializedOrigin = JSON.stringify(String(targetOrigin || "*"));
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>Trakt connected</title></head>
 <body>
 <script>
 const payload = ${jsonPayload};
-try { if (window.opener) window.opener.postMessage(payload, ${JSON.stringify(targetOrigin)}); } catch (error) {}
+const targetOrigin = ${serializedOrigin};
+try { if (window.opener) window.opener.postMessage(payload, targetOrigin); } catch (error) {}
+try { if (window.opener && targetOrigin !== "*") window.opener.postMessage(payload, "*"); } catch (error) {}
 try { new BroadcastChannel("nuvio-trakt-bridge.trakt-oauth").postMessage(payload); } catch (error) {}
 window.close();
 </script>
@@ -170,15 +177,43 @@ You can close this window.
 </body></html>`;
 }
 
-function serveRuntimeConfig(response) {
-  const origin = process.env.TRAKT_CALLBACK_ORIGIN || `http://${host}:${port}`;
+function serveRuntimeConfig(request, response) {
+  const origin = resolveCallbackOrigin(request);
   const script = `window.NUVIO_TRAKT_BRIDGE_CONFIG = ${JSON.stringify({
     traktLoginUrlEndpoint: "/api/trakt/login-url",
     traktRefreshEndpoint: "/api/trakt/refresh",
-    traktCallbackOrigin: origin,
+    traktCallbackOrigin: origin === "*" ? "" : origin,
   }, null, 2)};`;
   response.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
   response.end(script);
+}
+
+function normalizeOrigin(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  try {
+    const url = new URL(text);
+    if (!["http:", "https:"].includes(url.protocol)) return "";
+    if (url.hostname === "0.0.0.0") return "";
+    return url.origin;
+  } catch {
+    return "";
+  }
+}
+
+function requestOrigin(request) {
+  const host = String(request?.headers?.host || "").trim();
+  if (!host || host.startsWith("0.0.0.0")) return "";
+  const forwardedProto = String(request.headers["x-forwarded-proto"] || "").split(",")[0].trim();
+  const protocol = forwardedProto || "http";
+  return normalizeOrigin(`${protocol}://${host}`);
+}
+
+function resolveCallbackOrigin(request, preferredOrigin = "") {
+  return normalizeOrigin(preferredOrigin)
+    || normalizeOrigin(process.env.TRAKT_CALLBACK_ORIGIN)
+    || requestOrigin(request)
+    || "*";
 }
 
 function requireEnv(names) {
@@ -259,24 +294,28 @@ function serverSetupError() {
   return error;
 }
 
-function rememberOauthState(state) {
+function rememberOauthState(state, returnOrigin = "") {
   cleanupOauthStates();
-  oauthStates.set(state, Date.now() + OAUTH_STATE_TTL_MS);
+  oauthStates.set(state, {
+    expiresAt: Date.now() + OAUTH_STATE_TTL_MS,
+    returnOrigin: normalizeOrigin(returnOrigin),
+  });
 }
 
 function consumeOauthState(state) {
   cleanupOauthStates();
   if (!state || !oauthStates.has(state)) {
-    return false;
+    return null;
   }
+  const entry = oauthStates.get(state);
   oauthStates.delete(state);
-  return true;
+  return entry;
 }
 
 function cleanupOauthStates() {
   const now = Date.now();
-  for (const [state, expiresAt] of oauthStates.entries()) {
-    if (expiresAt <= now) {
+  for (const [state, entry] of oauthStates.entries()) {
+    if (entry.expiresAt <= now) {
       oauthStates.delete(state);
     }
   }
