@@ -21,13 +21,9 @@ A **Nuvio Trakt Bridge** egy önálló webes eszköz, amely a **Trakt.tv** „me
 
 ---
 
-## Eredeti projekt vs. saját fork
+## Mire való
 
-**Eredeti:** [haaihond/Trakt-Nuvio-Bridge](https://github.com/haaihond/Trakt-Nuvio-Bridge)
-
-**Saját fork:** [aicon/Trakt-Nuvio-Bridge](https://github.com/aicon/Trakt-Nuvio-Bridge)
-
-A fork célja: saját NAS-on (Debian + Docker) futtatás, epizód-remapping megbízhatóság nagy könyvtáraknál, és hosszú távú bejelentkezés megőrzése.
+A híd saját gépen fut, Dockerrel. Nagy könyvtárnál az epizódok igazítása végigfut, és a belépés a böngészőben megmarad.
 
 ---
 
@@ -109,25 +105,24 @@ A fork célja: saját NAS-on (Debian + Docker) futtatás, epizód-remapping megb
 **Új fájlok:**
 
 - `Dockerfile` – Node 18 Alpine, `node server.js`, port 4173
-- `docker-compose.yml` – build + env változók
+- `docker-compose.yml` – kész kép és env változók
 - `.env.example` – Trakt OAuth sablon
 - `.dockerignore`
 
 ---
 
-### 7. Upstream frissítés, 2026. július
-
-Az eredeti tároló négy új commitja bekerült, a saját NAS-os, remappelési és munkamenet-módosítások megmaradtak.
+### 7. Nuvio cím és könyvtárképek, 2026. július
 
 - A Nuvio címe `https://api.nuvio.tv`, a nyilvános kulcs a mostani publishable kulcs. A régi Supabase-cím már nem a hivatalos végpont.
 - A watchlist és a collection tételei a Nuvio metaadat-bővítményeitől kapnak posztert és hátteret. Ha az új tételen nincs kép vagy leírás, a könyvtárban már meglévő marad.
-- Az eredeti tároló jelzése szerint a további fejlesztés a [Nuvio-Wiki-Website](https://github.com/haaihond/Nuvio-Wiki-Website) oldalra került. Ez a fork továbbra is az [aicon/Trakt-Nuvio-Bridge](https://github.com/aicon/Trakt-Nuvio-Bridge) tárolóban van.
 
 ---
 
-### 8. PKCE belépés
+### 8. Belépés Client Secret nélkül
 
-A Trakt új alkalmazása nem ad Client Secretet. A belépés PKCE: a szerver a Client ID-val és egy egyszeri `code_verifier`rel kéri a tokent. A redirect a `.env` fájlból jön, és a böngészőben megnyitott cím. Ugyanez a szöveg kell a Trakt alkalmazás Redirect uri mezőjébe.
+A Trakt új alkalmazása nem ad Client Secretet. A **Connect Trakt** eszközkódot mutat, azt a [trakt.tv/activate](https://trakt.tv/activate) oldalon kell beírni. Ez sima HTTP-n, másik gépről is működik. A PKCE-s visszahívás megmaradt, ha a nyilvános cím HTTPS vagy loopback, és a redirect betűre egyezik a Trakt alkalmazás mezőjével.
+
+Az ingyenes Trakt-fiók csak két alkalmazást enged az API-ra kötni.
 
 ---
 
@@ -139,6 +134,7 @@ A Trakt új alkalmazása nem ad Client Secretet. A belépés PKCE: a szerver a C
 | 4 speciális epizód fallback | Pl. Knight Rider S00 – katalógus / addon hiány |
 | Adult / hidden Trakt | A Trakt API nem adja a watched listában – Bridge sem látja |
 | Cron | Böngészős eszköz; automatizálás = külön tervezés |
+| Ingyenes Trakt-fiók | Csak két alkalmazást enged az API-ra kötni |
 
 ---
 

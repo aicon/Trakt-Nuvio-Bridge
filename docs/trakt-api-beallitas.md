@@ -1,6 +1,6 @@
 # Trakt API alkalmazás beállítása
 
-A Bridge Trakt bejelentkezéshez **OAuth alkalmazást** kell regisztrálni a Trakt.tv-n. Az új alkalmazás PKCE-vel lép be, és **nem ad Client Secretet**. A szerver csak a Client ID-t használja.
+A Bridge Trakt bejelentkezéshez **OAuth alkalmazást** kell regisztrálni a Trakt.tv-n. Az új alkalmazás **nem ad Client Secretet**. A Connect Trakt eszközkóddal lép be, a szerver csak a Client ID-t használja. Az ingyenes Trakt-fiók csak két alkalmazást enged az API-ra kötni.
 
 ## 1. Alkalmazás létrehozása
 
@@ -73,7 +73,7 @@ A Trakt app Redirect uri mezőjét is frissítsd **https**-re.
 
 1. Indítsd a konténert: `docker compose pull && docker compose up -d`
 2. Nyisd meg a Bridge URL-t böngészőben.
-3. **Connect Trakt** – popup → engedélyezés → főoldal: **Trakt connected**
+3. **Connect Trakt** – a kódot a https://trakt.tv/activate oldalon beírni → főoldal: **Trakt connected**
 4. Logban ne legyen: `crypto is not defined`, `plan is not defined`
 
 ---
@@ -82,7 +82,7 @@ A Trakt app Redirect uri mezőjét is frissítsd **https**-re.
 
 | Hiba / tünet | Ok | Megoldás |
 |--------------|-----|----------|
-| Popup OK, főoldal disconnected | Redirect / origin eltérés | `TRAKT_CALLBACK_ORIGIN` = böngésző URL |
+| HTTPS visszahívás után a főoldal disconnected | Redirect / origin eltérés | `TRAKT_CALLBACK_ORIGIN` = böngésző URL |
 | `invalid redirect_uri` | Trakt app ≠ env | Pontos egyezés, http vs https |
 | `invalid redirect uri` | A küldött cím nincs a Trakt alkalmazáson | A Redirect uri mező és a `TRAKT_REDIRECT_URI` legyen ugyanaz a böngészőcím + `/api/trakt/callback` |
 | `Trakt sign-in is not configured` | Hiányzó Client ID | `.env` + konténer újraindítás |

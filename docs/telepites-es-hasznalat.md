@@ -26,7 +26,7 @@ A kép: `ghcr.io/aicon/trakt-nuvio-bridge:latest`. Nyisd meg: `http://127.0.0.1:
 
 ## Első használat
 
-1. **Connect Trakt** – OAuth popup, engedélyezés
+1. **Connect Trakt** – a lap kódot ad, azt a https://trakt.tv/activate oldalon kell beírni
 2. **Connect Nuvio** – email + jelszó (csak memóriában / session; jelszó nem mentődik)
 3. Válaszd ki a **Nuvio profilt**
 4. Kapcsolók: **Sync history** (ajánlott), progress / watchlist / collection opcionális
@@ -74,7 +74,7 @@ A `.env` fájl általában nincs verziókezelve – megmarad.
 ```yaml
 services:
   trakt-nuvio-bridge:
-    build: .
+    image: ghcr.io/aicon/trakt-nuvio-bridge:latest
     ports:
       - "${HOST_PORT:-4173}:4173"
     environment:
@@ -166,7 +166,6 @@ Ne várj azonos számokat. Yamtrack history / ratings / watchlist forrásokból 
 ## Következő lépések (opcionális, nincs implementálva)
 
 - Headless / cron sync (szerver oldali API)
-- GHCR előre buildelt imázs
 - HTTPS Let's Encrypt automatizálás
 - CrossWatch integráció (kétirányú sync más rendszerekkel)
 

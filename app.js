@@ -645,7 +645,7 @@ function resolveRemoteError(payload) {
 
 function loginEndpointError(error) {
   if (error?.status === 404) {
-    return "The Trakt login endpoint is missing. Deploy /api/trakt/login-url like the reference site, then try again.";
+    return "The Trakt login endpoint is missing on this server.";
   }
   const remote = resolveRemoteError(error?.body);
   if (remote) {

@@ -6,5 +6,4 @@ node_modules
 *.log
 _nuvio_src/
 _github_linux_fix/
-api/
 tmp/

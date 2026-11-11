@@ -1,6 +1,6 @@
 # Nuvio Trakt Bridge – dokumentáció
 
-Magyar nyelvű leírások a saját fork (`aicon/Trakt-Nuvio-Bridge`) telepítéséhez, használatához és a projektben elvégzett módosításokhoz.
+Magyar nyelvű leírások az `aicon/Trakt-Nuvio-Bridge` telepítéséhez, használatához és a projektben elvégzett módosításokhoz.
 
 ## Tartalom
 
@@ -13,5 +13,4 @@ Magyar nyelvű leírások a saját fork (`aicon/Trakt-Nuvio-Bridge`) telepítés
 ## Gyors linkek
 
 - GitHub: https://github.com/aicon/Trakt-Nuvio-Bridge
-- Eredeti projekt: https://github.com/haaihond/Trakt-Nuvio-Bridge
 - Trakt API app regisztráció: https://trakt.tv/oauth/applications
