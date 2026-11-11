@@ -44,29 +44,33 @@ https://trakt-nuvio.example.com/api/trakt/callback
 Másold a `.env.example` fájlt `.env`-re, és töltsd ki:
 
 ```env
-HOST_PORT=4173
+pname0=trakt
+strp23=4173
 
-TRAKT_CLIENT_ID=abcdef0123456789...   # 64 karakter
-TRAKT_REDIRECT_URI=http://127.0.0.1:4173/api/trakt/callback
-TRAKT_CALLBACK_ORIGIN=http://127.0.0.1:4173
+TRAKT_CLIENT_ID_00=abcdef0123456789...   # 64 karakter
+TRAKT_REDIRECT_URI_00=http://127.0.0.1:4173/api/trakt/callback
+TRAKT_CALLBACK_ORIGIN_00=http://127.0.0.1:4173
 ```
+
+A Compose ezeket adja át a konténernek `TRAKT_CLIENT_ID`, `TRAKT_REDIRECT_URI` és `TRAKT_CALLBACK_ORIGIN` néven.
 
 ### Változók jelentése
 
 | Változó | Kötelező | Leírás |
 |---------|----------|--------|
-| `TRAKT_CLIENT_ID` | Igen | Trakt app Client ID |
-| `TRAKT_REDIRECT_URI` | Igen | OAuth redirect – **egyezzen** a Trakt app Redirect uri mezővel. HTTP csak `127.0.0.1` vagy `localhost`. |
-| `TRAKT_CALLBACK_ORIGIN` | Igen | A böngészőben megnyitott Bridge URL (scheme + host + port) |
-| `HOST_PORT` | Nem | Host oldali port (alap: 4173) |
+| `TRAKT_CLIENT_ID_00` | Igen | Trakt app Client ID |
+| `TRAKT_REDIRECT_URI_00` | Igen | OAuth redirect – **egyezzen** a Trakt app Redirect uri mezővel. HTTP csak `127.0.0.1` vagy `localhost`. |
+| `TRAKT_CALLBACK_ORIGIN_00` | Igen | A böngészőben megnyitott Bridge URL (scheme + host + port) |
+| `strp23` | Igen | Host oldali port |
+| `pname0` | Igen | A konténernév előtagja |
 
 ### HTTPS + nginx
 
 Ha reverse proxy mögött fut:
 
 ```env
-TRAKT_REDIRECT_URI=https://trakt-nuvio.example.com/api/trakt/callback
-TRAKT_CALLBACK_ORIGIN=https://trakt-nuvio.example.com
+TRAKT_REDIRECT_URI_00=https://trakt-nuvio.example.com/api/trakt/callback
+TRAKT_CALLBACK_ORIGIN_00=https://trakt-nuvio.example.com
 ```
 
 Az nginx proxy_pass a konténerre mutasson (pl. `http://127.0.0.1:4173`).

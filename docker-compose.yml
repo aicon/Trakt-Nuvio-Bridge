@@ -1,14 +1,14 @@
 services:
   trakt-nuvio-bridge:
     image: ghcr.io/aicon/trakt-nuvio-bridge:latest
-    container_name: trakt-nuvio-bridge
+    #image: trakt-nuvio-bridge:latest
+    container_name: ${pname0}-trakt-nuvio-bridge
     ports:
-      - "${HOST_PORT:-4173}:4173"
+      - "${strp23:?err}:4173"
     environment:
       HOST: 0.0.0.0
       PORT: 4173
-      TRAKT_CLIENT_ID: ${TRAKT_CLIENT_ID:?set TRAKT_CLIENT_ID in .env}
-      TRAKT_REDIRECT_URI: ${TRAKT_REDIRECT_URI:?set TRAKT_REDIRECT_URI in .env}
-      TRAKT_CALLBACK_ORIGIN: ${TRAKT_CALLBACK_ORIGIN:?set TRAKT_CALLBACK_ORIGIN in .env}
+      TRAKT_CLIENT_ID: ${TRAKT_CLIENT_ID_00:?err}
+      TRAKT_REDIRECT_URI: ${TRAKT_REDIRECT_URI_00:?err}
+      TRAKT_CALLBACK_ORIGIN: ${TRAKT_CALLBACK_ORIGIN_00:?err}
     restart: unless-stopped
-   
