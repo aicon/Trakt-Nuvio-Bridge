@@ -60,9 +60,9 @@ docker compose pull
 docker compose up -d
 ```
 
-The image is `ghcr.io/aicon/trakt-nuvio-bridge:latest`. Open `http://127.0.0.1:4173/` (or the port set in `strp23`).
+The image is `ghcr.io/aicon/trakt-nuvio-bridge:latest`. Open `http://127.0.0.1:4173/` (or the port set in `HOST_PORT`).
 
-Use the same public URL in both `TRAKT_REDIRECT_URI_00` and `TRAKT_CALLBACK_ORIGIN_00`. If nginx terminates HTTPS in front of the container, point both variables at the public `https://` URL and proxy to `127.0.0.1:4173`.
+Use the same public URL in both `TRAKT_REDIRECT_URI` and `TRAKT_CALLBACK_ORIGIN`. If nginx terminates HTTPS in front of the container, point both variables at the public `https://` URL and proxy to `127.0.0.1:4173`.
 
 ```bash
 docker compose logs -f trakt-nuvio-bridge

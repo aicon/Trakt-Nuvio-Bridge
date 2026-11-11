@@ -20,7 +20,7 @@ docker compose pull
 docker compose up -d
 ```
 
-A kép: `ghcr.io/aicon/trakt-nuvio-bridge:latest`. Nyisd meg: `http://127.0.0.1:4173/` (vagy a `strp23` értékét).
+A kép: `ghcr.io/aicon/trakt-nuvio-bridge:latest`. Nyisd meg: `http://127.0.0.1:4173/` (vagy a `HOST_PORT` értékét).
 
 ---
 
@@ -74,18 +74,13 @@ A `.env` fájl általában nincs verziókezelve – megmarad.
 ```yaml
 services:
   trakt-nuvio-bridge:
-    image: ghcr.io/aicon/trakt-nuvio-bridge:latest
-    #image: trakt-nuvio-bridge:latest
-    container_name: ${pname0}-trakt-nuvio-bridge
+    build: .
     ports:
-      - "${strp23:?err}:4173"
+      - "${HOST_PORT:-4173}:4173"
     environment:
-      HOST: 0.0.0.0
-      PORT: 4173
-      TRAKT_CLIENT_ID: ${TRAKT_CLIENT_ID_00:?err}
-      TRAKT_REDIRECT_URI: ${TRAKT_REDIRECT_URI_00:?err}
-      TRAKT_CALLBACK_ORIGIN: ${TRAKT_CALLBACK_ORIGIN_00:?err}
-    restart: unless-stopped
+      TRAKT_CLIENT_ID: ...
+      TRAKT_REDIRECT_URI: ...
+      TRAKT_CALLBACK_ORIGIN: ...
 ```
 
 Logok:
