@@ -115,6 +115,16 @@ A fork célja: saját NAS-on (Debian + Docker) futtatás, epizód-remapping megb
 
 ---
 
+### 7. Upstream frissítés, 2026. július
+
+Az eredeti tároló négy új commitja bekerült, a saját NAS-os, remappelési és munkamenet-módosítások megmaradtak.
+
+- A Nuvio címe `https://api.nuvio.tv`, a nyilvános kulcs a mostani publishable kulcs. A régi Supabase-cím már nem a hivatalos végpont.
+- A watchlist és a collection tételei a Nuvio metaadat-bővítményeitől kapnak posztert és hátteret. Ha az új tételen nincs kép vagy leírás, a könyvtárban már meglévő marad.
+- Az eredeti tároló jelzése szerint a további fejlesztés a [Nuvio-Wiki-Website](https://github.com/haaihond/Nuvio-Wiki-Website) oldalra került. Ez a fork továbbra is az [aicon/Trakt-Nuvio-Bridge](https://github.com/aicon/Trakt-Nuvio-Bridge) tárolóban van.
+
+---
+
 ## Ismert korlátok
 
 | Téma | Magyarázat |

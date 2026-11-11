@@ -1,8 +1,8 @@
 "use strict";
 
 const TRAKT_API = "https://api.trakt.tv";
-const NUVIO_BASE = "https://dpyhjjcoabcglfmgecug.supabase.co";
-const NUVIO_KEY = "sb_publishable_zcNkgqGJjBtj8GoRlMvl9A_zkdmXhf5";
+const NUVIO_BASE = "https://api.nuvio.tv";
+const NUVIO_KEY = "sb_publishable_1Clq8rlTVACkdcZuqr6_AD__xUUC_EN";
 const APP_CONFIG = globalThis.NUVIO_TRAKT_BRIDGE_CONFIG || {};
 const PREFS_KEY = "nuvio-trakt-bridge:prefs:v1";
 const SESSION_KEY = "nuvio-trakt-bridge:session:v1";
@@ -1667,9 +1667,7 @@ async function pullTraktPlan(options) {
     fallbackIds: 0,
     remappedEpisodes: 0,
   };
-  const episodeMapper = options.syncHistory || options.syncProgress
-    ? await prepareEpisodeMapper()
-    : null;
+  const episodeMapper = await prepareEpisodeMapper();
 
   if (options.syncHistory) {
     const [movies, shows] = await Promise.all([
@@ -1717,8 +1715,8 @@ async function pullTraktPlan(options) {
         options,
       ),
     ]);
-    plan.library.push(...mapLibraryItems(movies, "watchlist", "movie", remaps, plan));
-    plan.library.push(...mapLibraryItems(shows, "watchlist", "show", remaps, plan));
+    plan.library.push(...(await mapLibraryItems(movies, "watchlist", "movie", remaps, plan, episodeMapper)));
+    plan.library.push(...(await mapLibraryItems(shows, "watchlist", "show", remaps, plan, episodeMapper)));
   }
 
   if (options.syncCollection) {
@@ -1726,8 +1724,8 @@ async function pullTraktPlan(options) {
       fetchAllTrakt(["/sync/collection/movies"], { extended: "full" }, "collection movies", options),
       fetchAllTrakt(["/sync/collection/shows"], { extended: "full" }, "collection shows", options, { paged: false }),
     ]);
-    plan.library.push(...mapLibraryItems(movies, "collection", "movie", remaps, plan));
-    plan.library.push(...mapLibraryItems(shows, "collection", "show", remaps, plan));
+    plan.library.push(...(await mapLibraryItems(movies, "collection", "movie", remaps, plan, episodeMapper)));
+    plan.library.push(...(await mapLibraryItems(shows, "collection", "show", remaps, plan, episodeMapper)));
   }
 
   plan.library = dedupeBy(plan.library, (item) => item.content_id, "added_at");
@@ -1897,7 +1895,7 @@ async function mapPlayback(items, forcedType, remaps, plan, options, episodeMapp
   return mapped;
 }
 
-function mapLibraryItems(items, source, contentKind, remaps, plan) {
+async function mapLibraryItems(items, source, contentKind, remaps, plan, episodeMapper) {
   const mapped = [];
   for (const item of items) {
     const media = contentKind === "movie" ? item.movie || item : item.show || item;
@@ -1906,13 +1904,27 @@ function mapLibraryItems(items, source, contentKind, remaps, plan) {
       skip(plan, media?.title || source, `missing ${contentKind} ID`);
       continue;
     }
+    const metaType = contentKind === "movie" ? "movie" : "series";
+    let poster = null;
+    let background = null;
+    if (episodeMapper?.addons?.length) {
+      try {
+        const meta = await fetchMetaFromAddons(episodeMapper, metaType, id.value);
+        if (meta) {
+          poster = meta.poster || null;
+          background = meta.background || null;
+        }
+      } catch {
+        // Addon metadata unavailable; Nuvio can still resolve these later.
+      }
+    }
     mapped.push({
       content_id: id.value,
-      content_type: contentKind === "movie" ? "movie" : "series",
+      content_type: metaType,
       name: media.title || "Untitled",
-      poster: null,
+      poster,
       poster_shape: "POSTER",
-      background: null,
+      background,
       description: media.overview || null,
       release_info: media.year ? String(media.year) : null,
       imdb_rating: typeof media.rating === "number" ? media.rating : null,
@@ -2000,7 +2012,9 @@ async function pushPlanToNuvio(plan) {
   if (plan.library.length) {
     logLine("Pulling current Nuvio library before merge because Nuvio library push is full replace.");
     const existing = await pullNuvioLibrary(profileId);
-    const merged = dedupeBy([...existing.map(cleanNuvioLibraryItem), ...plan.library.map(stripPrivateFields)], (item) => item.content_id, "added_at");
+    const cleanedExisting = existing.map(cleanNuvioLibraryItem);
+    const merged = dedupeBy([...cleanedExisting, ...plan.library.map(stripPrivateFields)], (item) => item.content_id, "added_at");
+    mergeLibraryMetadata(merged, cleanedExisting);
     await nuvioRpc("sync_push_library", {
       p_profile_id: profileId,
       p_items: merged,
@@ -2065,6 +2079,21 @@ async function verifyNuvioPush(profileId, plan) {
     const actual = new Set(progress.map(progressKey));
     const matched = [...expected].filter((key) => actual.has(key)).length;
     logLine(`Verified ${matched}/${expected.size} progress keys in Nuvio Sync profile ${profileId}.`);
+  }
+}
+
+function mergeLibraryMetadata(merged, existingItems) {
+  if (!existingItems.length) return;
+  const existingMap = new Map();
+  for (const item of existingItems) {
+    if (item.content_id) existingMap.set(item.content_id, item);
+  }
+  for (const item of merged) {
+    const existing = existingMap.get(item.content_id);
+    if (!existing) continue;
+    if (!item.poster && existing.poster) item.poster = existing.poster;
+    if (!item.background && existing.background) item.background = existing.background;
+    if (!item.description && existing.description) item.description = existing.description;
   }
 }
 
