@@ -53,17 +53,20 @@ async function handleLoginUrl(request, response) {
   const body = await readJsonBody(request);
   const returnOrigin = resolveCallbackOrigin(request, body.return_origin);
   const state = crypto.randomUUID();
-  rememberOauthState(state, returnOrigin);
-  const url = new URL("https://trakt.tv/oauth/authorize");
+  const codeVerifier = createCodeVerifier();
+  rememberOauthState(state, returnOrigin, codeVerifier);
+  const url = new URL("https://auth.trakt.tv/oauth/authorize");
   url.searchParams.set("response_type", "code");
   url.searchParams.set("client_id", clientId);
   url.searchParams.set("redirect_uri", redirectUri);
   url.searchParams.set("state", state);
+  url.searchParams.set("code_challenge", createCodeChallenge(codeVerifier));
+  url.searchParams.set("code_challenge_method", "S256");
   json(response, 200, { url: url.toString(), state, client_id: clientId });
 }
 
 async function handleCallback(url, request, response) {
-  const { clientId, clientSecret, redirectUri } = traktConfig();
+  const { clientId, redirectUri } = traktConfig();
   const code = url.searchParams.get("code");
   const error = url.searchParams.get("error");
   const state = url.searchParams.get("state") || "";
@@ -102,9 +105,9 @@ async function handleCallback(url, request, response) {
     body: JSON.stringify({
       code,
       client_id: clientId,
-      client_secret: clientSecret,
       redirect_uri: redirectUri,
       grant_type: "authorization_code",
+      code_verifier: oauthEntry.codeVerifier,
     }),
   });
   const { payload, text } = await readJsonResponse(traktResponse);
@@ -124,7 +127,7 @@ async function handleCallback(url, request, response) {
 }
 
 async function handleRefresh(request, response) {
-  const { clientId, clientSecret, redirectUri } = traktConfig();
+  const { clientId, redirectUri } = traktConfig();
   const body = await readJsonBody(request);
   if (!body.refresh_token) {
     json(response, 400, { error: "Missing refresh token" });
@@ -140,7 +143,6 @@ async function handleRefresh(request, response) {
     body: JSON.stringify({
       refresh_token: body.refresh_token,
       client_id: clientId,
-      client_secret: clientSecret,
       redirect_uri: redirectUri,
       grant_type: "refresh_token",
     }),
@@ -224,14 +226,21 @@ function requireEnv(names) {
 }
 
 function traktConfig() {
-  requireEnv(["TRAKT_CLIENT_ID", "TRAKT_CLIENT_SECRET", "TRAKT_REDIRECT_URI"]);
+  requireEnv(["TRAKT_CLIENT_ID", "TRAKT_REDIRECT_URI"]);
   const redirectUri = String(process.env.TRAKT_REDIRECT_URI || "").trim();
   validateRedirectUri(redirectUri);
   return {
     clientId: validatedTraktClientId(),
-    clientSecret: String(process.env.TRAKT_CLIENT_SECRET || "").trim(),
     redirectUri,
   };
+}
+
+function createCodeVerifier() {
+  return crypto.randomBytes(32).toString("base64url");
+}
+
+function createCodeChallenge(verifier) {
+  return crypto.createHash("sha256").update(verifier).digest("base64url");
 }
 
 function validatedTraktClientId() {
@@ -243,14 +252,23 @@ function validatedTraktClientId() {
 }
 
 function validateRedirectUri(redirectUri) {
+  let url;
   try {
-    const url = new URL(redirectUri);
-    if (!["http:", "https:"].includes(url.protocol)) {
-      throw new Error();
-    }
+    url = new URL(redirectUri);
   } catch {
     throw serverSetupError();
   }
+  if (url.protocol === "https:") return;
+  if (url.protocol === "http:" && isLoopbackHost(url.hostname)) return;
+  const error = new Error("Trakt rejected this redirect.");
+  error.status = 400;
+  error.publicMessage = "Trakt only allows http:// on localhost or 127.0.0.1. Open the bridge at http://127.0.0.1:4173 and set TRAKT_REDIRECT_URI to http://127.0.0.1:4173/api/trakt/callback. Any other address needs https://.";
+  throw error;
+}
+
+function isLoopbackHost(hostname) {
+  const host = String(hostname || "").replace(/^\[|\]$/g, "").toLowerCase();
+  return host === "localhost" || host === "127.0.0.1" || host === "::1";
 }
 
 async function readJsonResponse(response) {
@@ -294,11 +312,12 @@ function serverSetupError() {
   return error;
 }
 
-function rememberOauthState(state, returnOrigin = "") {
+function rememberOauthState(state, returnOrigin = "", codeVerifier = "") {
   cleanupOauthStates();
   oauthStates.set(state, {
     expiresAt: Date.now() + OAUTH_STATE_TTL_MS,
     returnOrigin: normalizeOrigin(returnOrigin),
+    codeVerifier,
   });
 }
 

@@ -125,6 +125,12 @@ Az eredeti tároló négy új commitja bekerült, a saját NAS-os, remappelési 
 
 ---
 
+### 8. PKCE belépés
+
+A Trakt új alkalmazása nem ad Client Secretet. A belépés PKCE: a szerver a Client ID-val és egy egyszeri `code_verifier`rel kéri a tokent. A sima HTTP átirányítás csak `http://127.0.0.1:4173/api/trakt/callback` vagy `localhost` lehet. Más címnél a Trakt az `invalid_request` / HTTPS hibát adja.
+
+---
+
 ## Ismert korlátok
 
 | Téma | Magyarázat |

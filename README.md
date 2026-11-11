@@ -38,12 +38,12 @@ For Trakt login testing, use the included tiny server instead of a static file s
 
 ```powershell
 $env:TRAKT_CLIENT_ID="your_64_character_trakt_client_id"
-$env:TRAKT_CLIENT_SECRET="your_app_client_secret"
 $env:TRAKT_REDIRECT_URI="http://127.0.0.1:4173/api/trakt/callback"
+$env:TRAKT_CALLBACK_ORIGIN="http://127.0.0.1:4173"
 node .\server.js
 ```
 
-Then open `http://127.0.0.1:4173/`.
+Then open `http://127.0.0.1:4173/`. Sign-in uses PKCE and only the Client ID. Trakt accepts plain `http://` for `127.0.0.1` and `localhost`. Any other address has to be `https://`.
 
 When `TRAKT_CLIENT_ID` is set, `server.js` serves the browser config automatically. The public client ID is not preloaded into the page; it is returned by the login endpoint after the user presses `Connect Trakt`.
 
@@ -53,7 +53,8 @@ When `TRAKT_CLIENT_ID` is set, `server.js` serves the browser config automatical
 git clone https://github.com/aicon/Trakt-Nuvio-Bridge.git
 cd Trakt-Nuvio-Bridge
 cp .env.example .env
-# edit .env with your Trakt OAuth values and NAS URL
+# edit .env with the Trakt Client ID
+# local sign-in stays on http://127.0.0.1:4173
 
 docker compose up -d --build
 ```

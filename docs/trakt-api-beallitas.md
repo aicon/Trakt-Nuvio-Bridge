@@ -1,6 +1,6 @@
 # Trakt API alkalmazás beállítása
 
-A Bridge Trakt bejelentkezéshez **OAuth alkalmazást** kell regisztrálni a Trakt.tv-n. A **Client Secret** csak a szerveren (`server.js` / Docker env) lehet – a böngésző soha nem látja.
+A Bridge Trakt bejelentkezéshez **OAuth alkalmazást** kell regisztrálni a Trakt.tv-n. Az új alkalmazás PKCE-vel lép be, és **nem ad Client Secretet**. A szerver csak a Client ID-t használja.
 
 ## 1. Alkalmazás létrehozása
 
@@ -18,11 +18,13 @@ A Bridge Trakt bejelentkezéshez **OAuth alkalmazást** kell regisztrálni a Tra
 
 ### Redirect URI példák
 
-**Közvetlen NAS IP + port (HTTP):**
+**Helyi gép, sima HTTP.** A Trakt ezt csak loopback címre engedi:
 
 ```text
-http://192.168.1.100:4173/api/trakt/callback
+http://127.0.0.1:4173/api/trakt/callback
 ```
+
+A `192.168…` cím és a sima `http://` domain a második képen látható hibát adja: a Redirect URI-nak HTTPS-nek kell lennie, a HTTP csak localhoston és `127.0.0.1`-en megengedett.
 
 **Domain nginx mögött (HTTPS):**
 
@@ -33,9 +35,7 @@ https://trakt-nuvio.example.com/api/trakt/callback
 > A path mindig: `/api/trakt/callback` – ez a Bridge beépített OAuth végpontja.
 
 4. Mentsd el az alkalmazást.
-5. Másold ki:
-   - **Client ID** – 64 karakteres hex string
-   - **Client Secret** – titkos kulcs (ne oszd meg, ne commitold gitbe)
+5. Másold ki a **Client ID**-t. 64 karakteres hex string. Client Secret nincs, a Trakt PKCE mellett nem ad ki.
 
 ---
 
@@ -47,9 +47,8 @@ Másold a `.env.example` fájlt `.env`-re, és töltsd ki:
 HOST_PORT=4173
 
 TRAKT_CLIENT_ID=abcdef0123456789...   # 64 karakter
-TRAKT_CLIENT_SECRET=your_secret_here
-TRAKT_REDIRECT_URI=http://192.168.1.100:4173/api/trakt/callback
-TRAKT_CALLBACK_ORIGIN=http://192.168.1.100:4173
+TRAKT_REDIRECT_URI=http://127.0.0.1:4173/api/trakt/callback
+TRAKT_CALLBACK_ORIGIN=http://127.0.0.1:4173
 ```
 
 ### Változók jelentése
@@ -57,8 +56,7 @@ TRAKT_CALLBACK_ORIGIN=http://192.168.1.100:4173
 | Változó | Kötelező | Leírás |
 |---------|----------|--------|
 | `TRAKT_CLIENT_ID` | Igen | Trakt app Client ID |
-| `TRAKT_CLIENT_SECRET` | Igen | Trakt app Client Secret |
-| `TRAKT_REDIRECT_URI` | Igen | OAuth redirect – **egyezzen** a Trakt app Redirect uri mezővel |
+| `TRAKT_REDIRECT_URI` | Igen | OAuth redirect – **egyezzen** a Trakt app Redirect uri mezővel. HTTP csak `127.0.0.1` vagy `localhost`. |
 | `TRAKT_CALLBACK_ORIGIN` | Igen | A böngészőben megnyitott Bridge URL (scheme + host + port) |
 | `HOST_PORT` | Nem | Host oldali port (alap: 4173) |
 
@@ -92,8 +90,8 @@ A Trakt app Redirect uri mezőjét is frissítsd **https**-re.
 |--------------|-----|----------|
 | Popup OK, főoldal disconnected | Redirect / origin eltérés | `TRAKT_CALLBACK_ORIGIN` = böngésző URL |
 | `invalid redirect_uri` | Trakt app ≠ env | Pontos egyezés, http vs https |
-| `Trakt sign-in is not configured` | Hiányzó env | `.env` + konténer újraindítás |
-| 503 login endpoint | Secret / ID hiány | Ellenőrizd a docker env-et |
+| `Redirect URI must use HTTPS` | A cím nem loopback, és nem HTTPS | `http://127.0.0.1:4173/api/trakt/callback`, vagy HTTPS domain |
+| `Trakt sign-in is not configured` | Hiányzó Client ID | `.env` + konténer újraindítás |
 
 ---
 
