@@ -18,7 +18,7 @@ A Bridge Trakt bejelentkezéshez **OAuth alkalmazást** kell regisztrálni a Tra
 
 ### Redirect URI példák
 
-A Redirect URI a böngésző címe, plusz `/api/trakt/callback`. Ugyanez a szöveg kell a Trakt alkalmazás Redirect uri mezőjébe és a `.env` fájlba. A cím nincs a kódban: amelyik cím a böngésző címsorában van, azt kell beírni.
+A szerver a böngésző címsorából állítja össze a redirectet: a megnyitott cím plusz `/api/trakt/callback`. Ugyanez a szöveg kell a Trakt alkalmazás Redirect uri mezőjébe. A `.env` nem írja felül ezt a címet.
 
 **Domain nginx mögött (HTTPS):**
 

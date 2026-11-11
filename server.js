@@ -49,12 +49,13 @@ server.listen(port, host, () => {
 });
 
 async function handleLoginUrl(request, response) {
-  const { clientId, redirectUri } = traktConfig();
+  const clientId = validatedTraktClientId();
   const body = await readJsonBody(request);
   const returnOrigin = resolveCallbackOrigin(request, body.return_origin);
+  const redirectUri = resolveRedirectUri(request, returnOrigin);
   const state = crypto.randomUUID();
   const codeVerifier = createCodeVerifier();
-  rememberOauthState(state, returnOrigin, codeVerifier);
+  rememberOauthState(state, returnOrigin, codeVerifier, redirectUri);
   const url = new URL("https://auth.trakt.tv/oauth/authorize");
   url.searchParams.set("response_type", "code");
   url.searchParams.set("client_id", clientId);
@@ -66,7 +67,7 @@ async function handleLoginUrl(request, response) {
 }
 
 async function handleCallback(url, request, response) {
-  const { clientId, redirectUri } = traktConfig();
+  const clientId = validatedTraktClientId();
   const code = url.searchParams.get("code");
   const error = url.searchParams.get("error");
   const state = url.searchParams.get("state") || "";
@@ -105,7 +106,7 @@ async function handleCallback(url, request, response) {
     body: JSON.stringify({
       code,
       client_id: clientId,
-      redirect_uri: redirectUri,
+      redirect_uri: oauthEntry.redirectUri,
       grant_type: "authorization_code",
       code_verifier: oauthEntry.codeVerifier,
     }),
@@ -127,8 +128,9 @@ async function handleCallback(url, request, response) {
 }
 
 async function handleRefresh(request, response) {
-  const { clientId, redirectUri } = traktConfig();
+  const clientId = validatedTraktClientId();
   const body = await readJsonBody(request);
+  const redirectUri = resolveRedirectUri(request, body.redirect_uri || body.return_origin);
   if (!body.refresh_token) {
     json(response, 400, { error: "Missing refresh token" });
     return;
@@ -218,21 +220,29 @@ function resolveCallbackOrigin(request, preferredOrigin = "") {
     || "*";
 }
 
-function requireEnv(names) {
-  const missing = names.filter((name) => !String(process.env[name] || "").trim());
-  if (missing.length) {
-    throw serverSetupError();
-  }
+function resolveRedirectUri(request, preferred = "") {
+  const explicit = callbackUrl(preferred);
+  if (explicit) return explicit;
+  const fromRequest = callbackUrl(requestOrigin(request));
+  if (fromRequest) return fromRequest;
+  const configured = String(process.env.TRAKT_REDIRECT_URI || "").trim();
+  if (!configured) throw serverSetupError();
+  validateRedirectUri(configured);
+  return configured;
 }
 
-function traktConfig() {
-  requireEnv(["TRAKT_CLIENT_ID", "TRAKT_REDIRECT_URI"]);
-  const redirectUri = String(process.env.TRAKT_REDIRECT_URI || "").trim();
+function callbackUrl(value) {
+  const text = String(value || "").trim();
+  if (!text || text === "*") return "";
+  if (text.includes("/api/trakt/callback")) {
+    validateRedirectUri(text);
+    return text;
+  }
+  const origin = normalizeOrigin(text);
+  if (!origin) return "";
+  const redirectUri = `${origin}/api/trakt/callback`;
   validateRedirectUri(redirectUri);
-  return {
-    clientId: validatedTraktClientId(),
-    redirectUri,
-  };
+  return redirectUri;
 }
 
 function createCodeVerifier() {
@@ -303,12 +313,13 @@ function serverSetupError() {
   return error;
 }
 
-function rememberOauthState(state, returnOrigin = "", codeVerifier = "") {
+function rememberOauthState(state, returnOrigin = "", codeVerifier = "", redirectUri = "") {
   cleanupOauthStates();
   oauthStates.set(state, {
     expiresAt: Date.now() + OAUTH_STATE_TTL_MS,
     returnOrigin: normalizeOrigin(returnOrigin),
     codeVerifier,
+    redirectUri,
   });
 }
 

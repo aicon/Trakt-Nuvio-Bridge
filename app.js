@@ -683,6 +683,7 @@ async function refreshTraktToken(refreshToken) {
     body: JSON.stringify({
       refresh_token: refreshToken,
       grant_type: "refresh_token",
+      return_origin: location.origin,
     }),
   });
   return data;
