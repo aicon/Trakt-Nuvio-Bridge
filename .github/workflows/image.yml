@@ -50,5 +50,5 @@ jobs:
         run: |
           gh api --method PATCH \
             -H "Accept: application/vnd.github+json" \
-            "/user/packages/container/trakt-nuvio-bridge" \
+            "/users/aicon/packages/container/trakt-nuvio-bridge" \
             -f visibility=public
