@@ -43,7 +43,7 @@ $env:TRAKT_CALLBACK_ORIGIN="http://127.0.0.1:4173"
 node .\server.js
 ```
 
-Then open `http://127.0.0.1:4173/`. Sign-in uses PKCE and only the Client ID. Trakt accepts plain `http://` for `127.0.0.1` and `localhost`. Any other address has to be `https://`.
+Then open that same address in the browser. Sign-in uses PKCE and only the Client ID. The redirect comes from the environment, and the same string has to be saved on the Trakt app.
 
 When `TRAKT_CLIENT_ID` is set, `server.js` serves the browser config automatically. The public client ID is not preloaded into the page; it is returned by the login endpoint after the user presses `Connect Trakt`.
 

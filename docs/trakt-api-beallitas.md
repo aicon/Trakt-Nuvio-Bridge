@@ -18,13 +18,7 @@ A Bridge Trakt bejelentkezéshez **OAuth alkalmazást** kell regisztrálni a Tra
 
 ### Redirect URI példák
 
-**Helyi gép, sima HTTP.** A Trakt ezt csak loopback címre engedi:
-
-```text
-http://127.0.0.1:4173/api/trakt/callback
-```
-
-A `192.168…` cím és a sima `http://` domain a második képen látható hibát adja: a Redirect URI-nak HTTPS-nek kell lennie, a HTTP csak localhoston és `127.0.0.1`-en megengedett.
+A Redirect URI a böngésző címe, plusz `/api/trakt/callback`. Ugyanez a szöveg kell a Trakt alkalmazás Redirect uri mezőjébe és a `.env` fájlba. A cím nincs a kódban: amelyik cím a böngésző címsorában van, azt kell beírni.
 
 **Domain nginx mögött (HTTPS):**
 
@@ -47,8 +41,8 @@ Másold a `.env.example` fájlt `.env`-re, és töltsd ki:
 HOST_PORT=4173
 
 TRAKT_CLIENT_ID=a Trakt Credentials alatti Client ID
-TRAKT_REDIRECT_URI=http://127.0.0.1:4173/api/trakt/callback
-TRAKT_CALLBACK_ORIGIN=http://127.0.0.1:4173
+TRAKT_REDIRECT_URI=http://<host>:<port>/api/trakt/callback
+TRAKT_CALLBACK_ORIGIN=http://<host>:<port>
 ```
 
 ### Változók jelentése
@@ -56,7 +50,7 @@ TRAKT_CALLBACK_ORIGIN=http://127.0.0.1:4173
 | Változó | Kötelező | Leírás |
 |---------|----------|--------|
 | `TRAKT_CLIENT_ID` | Igen | Trakt app Client ID |
-| `TRAKT_REDIRECT_URI` | Igen | OAuth redirect – **egyezzen** a Trakt app Redirect uri mezővel. HTTP csak `127.0.0.1` vagy `localhost`. |
+| `TRAKT_REDIRECT_URI` | Igen | OAuth redirect – **pontosan** egyezzen a Trakt app Redirect uri mezőjével és a böngésző címével. |
 | `TRAKT_CALLBACK_ORIGIN` | Igen | A böngészőben megnyitott Bridge URL (scheme + host + port) |
 | `HOST_PORT` | Nem | Host oldali port (alap: 4173) |
 
@@ -90,7 +84,7 @@ A Trakt app Redirect uri mezőjét is frissítsd **https**-re.
 |--------------|-----|----------|
 | Popup OK, főoldal disconnected | Redirect / origin eltérés | `TRAKT_CALLBACK_ORIGIN` = böngésző URL |
 | `invalid redirect_uri` | Trakt app ≠ env | Pontos egyezés, http vs https |
-| `Redirect URI must use HTTPS` | A cím nem loopback, és nem HTTPS | `http://127.0.0.1:4173/api/trakt/callback`, vagy HTTPS domain |
+| `invalid redirect uri` | A küldött cím nincs a Trakt alkalmazáson | A Redirect uri mező és a `TRAKT_REDIRECT_URI` legyen ugyanaz a böngészőcím + `/api/trakt/callback` |
 | `Trakt sign-in is not configured` | Hiányzó Client ID | `.env` + konténer újraindítás |
 
 ---

@@ -258,17 +258,8 @@ function validateRedirectUri(redirectUri) {
   } catch {
     throw serverSetupError();
   }
-  if (url.protocol === "https:") return;
-  if (url.protocol === "http:" && isLoopbackHost(url.hostname)) return;
-  const error = new Error("Trakt rejected this redirect.");
-  error.status = 400;
-  error.publicMessage = "Trakt only allows http:// on localhost or 127.0.0.1. Open the bridge at http://127.0.0.1:4173 and set TRAKT_REDIRECT_URI to http://127.0.0.1:4173/api/trakt/callback. Any other address needs https://.";
-  throw error;
-}
-
-function isLoopbackHost(hostname) {
-  const host = String(hostname || "").replace(/^\[|\]$/g, "").toLowerCase();
-  return host === "localhost" || host === "127.0.0.1" || host === "::1";
+  if ((url.protocol === "https:" || url.protocol === "http:") && url.hostname) return;
+  throw serverSetupError();
 }
 
 async function readJsonResponse(response) {
