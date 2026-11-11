@@ -16,10 +16,11 @@ git clone https://github.com/aicon/Trakt-Nuvio-Bridge.git
 cd Trakt-Nuvio-Bridge
 cp .env.example .env
 nano .env   # Trakt kulcsok + URL-ek
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 ```
 
-Nyisd meg: `http://<host>:4173/` (vagy a `HOST_PORT` értékét).
+A kép: `ghcr.io/aicon/trakt-nuvio-bridge:latest`. Nyisd meg: `http://127.0.0.1:4173/` (vagy a `HOST_PORT` értékét).
 
 ---
 
@@ -49,7 +50,8 @@ Sync complete.
 ```bash
 cd /path/to/Trakt-Nuvio-Bridge
 git pull
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 ```
 
 ### Git pull ütközés (helyi módosítás)
@@ -59,7 +61,8 @@ Deploy klónban, ha csak a GitHub verzió kell:
 ```bash
 git fetch origin
 git reset --hard origin/main
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 ```
 
 A `.env` fájl általában nincs verziókezelve – megmarad.

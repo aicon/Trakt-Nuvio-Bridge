@@ -1,13 +1,6 @@
 services:
   trakt-nuvio-bridge:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        APPNAME: trakt-nuvio-bridge
-        VERSION: ${VERSION:-dev}
-        BUILD_DATE: ${BUILD_DATE:-unknown}
-    image: trakt-nuvio-bridge:${VERSION:-latest}
+    image: ghcr.io/aicon/trakt-nuvio-bridge:latest
     container_name: trakt-nuvio-bridge
     ports:
       - "${HOST_PORT:-4173}:4173"

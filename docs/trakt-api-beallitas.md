@@ -77,7 +77,7 @@ A Trakt app Redirect uri mezőjét is frissítsd **https**-re.
 
 ## 3. Ellenőrzés
 
-1. Indítsd a konténert: `docker compose up -d --build`
+1. Indítsd a konténert: `docker compose pull && docker compose up -d`
 2. Nyisd meg a Bridge URL-t böngészőben.
 3. **Connect Trakt** – popup → engedélyezés → főoldal: **Trakt connected**
 4. Logban ne legyen: `crypto is not defined`, `plan is not defined`
