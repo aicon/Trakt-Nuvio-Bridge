@@ -10,6 +10,7 @@ const host = process.env.HOST || "127.0.0.1";
 const TRAKT_CLIENT_ID_PATTERN = /^[A-Za-z0-9_-]{20,128}$/;
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 const oauthStates = new Map();
+const deviceLogins = new Map();
 const mime = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -22,6 +23,14 @@ const mime = {
 const server = http.createServer(async (request, response) => {
   try {
     const url = new URL(request.url || "/", `http://${request.headers.host}`);
+    if (url.pathname === "/api/trakt/device/start" && request.method === "POST") {
+      await handleDeviceStart(response);
+      return;
+    }
+    if (url.pathname === "/api/trakt/device/poll" && request.method === "POST") {
+      await handleDevicePoll(request, response);
+      return;
+    }
     if (url.pathname === "/api/trakt/login-url" && request.method === "POST") {
       await handleLoginUrl(request, response);
       return;
@@ -127,10 +136,89 @@ async function handleCallback(url, request, response) {
   }, callbackOrigin));
 }
 
+async function handleDeviceStart(response) {
+  const clientId = validatedTraktClientId();
+  const codeVerifier = createCodeVerifier();
+  let started = await postTrakt("/oauth/device/code", {
+    client_id: clientId,
+    code_challenge: createCodeChallenge(codeVerifier),
+    code_challenge_method: "S256",
+  });
+  let verifier = codeVerifier;
+  if (!started.response.ok) {
+    started = await postTrakt("/oauth/device/code", { client_id: clientId });
+    verifier = "";
+  }
+  if (!started.response.ok || !started.payload.device_code || !started.payload.user_code) {
+    json(response, started.response.status || 502, {
+      error: started.payload.error_description || started.payload.error || cleanResponseText(started.text) || "Trakt did not start device sign-in.",
+    });
+    return;
+  }
+  const state = crypto.randomUUID();
+  const expiresIn = Number(started.payload.expires_in) || 600;
+  deviceLogins.set(state, {
+    deviceCode: started.payload.device_code,
+    codeVerifier: verifier,
+    expiresAt: Date.now() + expiresIn * 1000,
+  });
+  json(response, 200, {
+    state,
+    user_code: started.payload.user_code,
+    verification_url: started.payload.verification_url || "https://trakt.tv/activate",
+    expires_in: expiresIn,
+    interval: Number(started.payload.interval) || 5,
+  });
+}
+
+async function handleDevicePoll(request, response) {
+  const clientId = validatedTraktClientId();
+  const body = await readJsonBody(request);
+  const entry = deviceLogins.get(String(body.state || ""));
+  if (!entry || entry.expiresAt <= Date.now()) {
+    deviceLogins.delete(String(body.state || ""));
+    json(response, 400, { error: "The Trakt code expired. Connect again." });
+    return;
+  }
+  const tokenBody = { code: entry.deviceCode, client_id: clientId };
+  if (entry.codeVerifier) tokenBody.code_verifier = entry.codeVerifier;
+  const polled = await postTrakt("/oauth/device/token", tokenBody);
+  if (polled.response.ok && polled.payload.access_token) {
+    deviceLogins.delete(String(body.state || ""));
+    json(response, 200, { status: "success", client_id: clientId, tokens: polled.payload });
+    return;
+  }
+  const error = String(polled.payload.error || "");
+  if (polled.response.status === 400 && (error === "authorization_pending" || error === "slow_down")) {
+    json(response, 200, { status: "pending", interval: error === "slow_down" ? 5 : 0 });
+    return;
+  }
+  deviceLogins.delete(String(body.state || ""));
+  json(response, 400, {
+    error: polled.payload.error_description || error || cleanResponseText(polled.text) || "Trakt rejected the device sign-in.",
+  });
+}
+
+async function postTrakt(path, body) {
+  const clientId = body.client_id;
+  const response = await fetch(`https://api.trakt.tv${path}`, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "trakt-api-version": "2",
+      "trakt-api-key": clientId,
+      "User-Agent": "Nuvio-Trakt-Bridge/1.0",
+    },
+    body: JSON.stringify(body),
+  });
+  const { payload, text } = await readJsonResponse(response);
+  return { response, payload, text };
+}
+
 async function handleRefresh(request, response) {
   const clientId = validatedTraktClientId();
   const body = await readJsonBody(request);
-  const redirectUri = resolveRedirectUri(request, body.redirect_uri || body.return_origin);
   if (!body.refresh_token) {
     json(response, 400, { error: "Missing refresh token" });
     return;
@@ -145,7 +233,6 @@ async function handleRefresh(request, response) {
     body: JSON.stringify({
       refresh_token: body.refresh_token,
       client_id: clientId,
-      redirect_uri: redirectUri,
       grant_type: "refresh_token",
     }),
   });

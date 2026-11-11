@@ -13,6 +13,9 @@ const dom = {
   traktStatus: $("#trakt-status"),
   nuvioStatus: $("#nuvio-status"),
   startTraktLogin: $("#start-trakt-login"),
+  traktDevice: $("#trakt-device"),
+  traktDeviceCode: $("#trakt-device-code"),
+  traktDeviceLink: $("#trakt-device-link"),
   logoutTrakt: $("#logout-trakt"),
   nuvioEmail: $("#nuvio-email"),
   nuvioPassword: $("#nuvio-password"),
@@ -45,6 +48,7 @@ let lastPlan = null;
 let previewRows = [];
 let previewPage = 1;
 let traktPending = false;
+let traktDeviceTimer = 0;
 let pendingTraktState = null;
 let pendingTraktClientId = "";
 let traktBroadcastChannel = null;
@@ -765,13 +769,86 @@ async function toggleNuvioConnection() {
   await loginNuvio();
 }
 
+async function startTraktDeviceLogin() {
+  readOptions();
+  if (traktPending) return;
+  traktPending = true;
+  dom.startTraktLogin.disabled = true;
+  setButtonLabel(dom.startTraktLogin, "Waiting for Trakt...");
+  logLine("Waiting for the Trakt device code.");
+  try {
+    const { data } = await requestJson("/api/trakt/device/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    dom.traktDevice.hidden = false;
+    dom.traktDeviceCode.textContent = data.user_code || "";
+    if (data.verification_url) {
+      dom.traktDeviceLink.href = data.verification_url;
+    }
+    const deadline = Date.now() + (Number(data.expires_in) || 600) * 1000;
+    let waitMs = Math.max(5, Number(data.interval) || 5) * 1000;
+    const poll = async () => {
+      if (!traktPending) return;
+      if (Date.now() > deadline) {
+        failTraktDevice("The Trakt code expired. Connect again.");
+        return;
+      }
+      try {
+        const { data: result } = await requestJson("/api/trakt/device/poll", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ state: data.state }),
+        });
+        if (result?.status === "success" && result.tokens?.access_token) {
+          state.trakt.token = normalizeTraktToken(result.tokens);
+          state.trakt.clientId = normalizeTraktClientId(result.client_id);
+          finishTraktDevice("Trakt connected.");
+          return;
+        }
+        if (Number(result?.interval) > 0) waitMs += Number(result.interval) * 1000;
+      } catch (error) {
+        failTraktDevice(loginEndpointError(error));
+        return;
+      }
+      traktDeviceTimer = window.setTimeout(poll, waitMs);
+    };
+    traktDeviceTimer = window.setTimeout(poll, waitMs);
+  } catch (error) {
+    failTraktDevice(loginEndpointError(error));
+  }
+}
+
+function finishTraktDevice(message) {
+  window.clearTimeout(traktDeviceTimer);
+  traktPending = false;
+  dom.traktDevice.hidden = true;
+  dom.startTraktLogin.disabled = false;
+  restoreButtonLabel(dom.startTraktLogin);
+  saveState();
+  updateAuthStatus();
+  logLine(message);
+  toast(message);
+}
+
+function failTraktDevice(message) {
+  window.clearTimeout(traktDeviceTimer);
+  traktPending = false;
+  dom.traktDevice.hidden = true;
+  dom.startTraktLogin.disabled = false;
+  restoreButtonLabel(dom.startTraktLogin);
+  logLine(`Trakt sign in failed: ${message}`);
+  toast(message);
+}
+
 async function toggleTraktConnection() {
   if (state.trakt.token?.access_token) {
     setButtonLabel(dom.startTraktLogin, "Disconnecting...");
     disconnectTrakt();
     return;
   }
-  await startTraktPopupLogin();
+  await startTraktDeviceLogin();
 }
 
 async function ensureNuvioAccessToken() {
@@ -2264,6 +2341,9 @@ function escapeHtml(value) {
 }
 
 function disconnectTrakt() {
+  window.clearTimeout(traktDeviceTimer);
+  traktPending = false;
+  if (dom.traktDevice) dom.traktDevice.hidden = true;
   state.trakt.token = null;
   state.trakt.clientId = "";
   pendingTraktState = null;
