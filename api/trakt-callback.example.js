@@ -61,7 +61,7 @@ export default async function handler(request, response) {
 
 function validatedTraktClientId() {
   const clientId = String(process.env.TRAKT_CLIENT_ID || "").trim();
-  if (!/^[a-f0-9]{64}$/i.test(clientId)) {
+  if (!/^[A-Za-z0-9_-]{20,128}$/.test(clientId)) {
     throw new Error("Trakt sign-in is not configured on this server yet. The site owner needs to configure the bridge OAuth app server-side; users should only have to press Connect Trakt.");
   }
   return clientId;

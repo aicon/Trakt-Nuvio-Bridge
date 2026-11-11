@@ -2242,7 +2242,7 @@ function cryptoRandomString() {
 
 function normalizeTraktClientId(value) {
   const clientId = String(value || "").trim();
-  return /^[a-f0-9]{64}$/i.test(clientId) ? clientId : "";
+  return /^[A-Za-z0-9_-]{20,128}$/.test(clientId) ? clientId : "";
 }
 
 function extractTraktClientIdFromUrl(value) {

@@ -35,7 +35,7 @@ https://trakt-nuvio.example.com/api/trakt/callback
 > A path mindig: `/api/trakt/callback` – ez a Bridge beépített OAuth végpontja.
 
 4. Mentsd el az alkalmazást.
-5. Másold ki a **Client ID**-t. 64 karakteres hex string. Client Secret nincs, a Trakt PKCE mellett nem ad ki.
+5. Másold ki a **Client ID**-t úgy, ahogy a Credentials alatt látszik. Az új PKCE-alkalmazás azonosítója rövidebb, nem 64 hex karakter. Client Secret nincs.
 
 ---
 
@@ -46,7 +46,7 @@ Másold a `.env.example` fájlt `.env`-re, és töltsd ki:
 ```env
 HOST_PORT=4173
 
-TRAKT_CLIENT_ID=abcdef0123456789...   # 64 karakter
+TRAKT_CLIENT_ID=a Trakt Credentials alatti Client ID
 TRAKT_REDIRECT_URI=http://127.0.0.1:4173/api/trakt/callback
 TRAKT_CALLBACK_ORIGIN=http://127.0.0.1:4173
 ```

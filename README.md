@@ -37,7 +37,7 @@ Nuvio watch history and watch progress pushes are non-destructive merge endpoint
 For Trakt login testing, use the included tiny server instead of a static file server:
 
 ```powershell
-$env:TRAKT_CLIENT_ID="your_64_character_trakt_client_id"
+$env:TRAKT_CLIENT_ID="your_trakt_client_id"
 $env:TRAKT_REDIRECT_URI="http://127.0.0.1:4173/api/trakt/callback"
 $env:TRAKT_CALLBACK_ORIGIN="http://127.0.0.1:4173"
 node .\server.js
