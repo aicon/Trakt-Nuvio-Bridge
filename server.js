@@ -138,17 +138,7 @@ async function handleCallback(url, request, response) {
 
 async function handleDeviceStart(response) {
   const clientId = validatedTraktClientId();
-  const codeVerifier = createCodeVerifier();
-  let started = await postTrakt("/oauth/device/code", {
-    client_id: clientId,
-    code_challenge: createCodeChallenge(codeVerifier),
-    code_challenge_method: "S256",
-  });
-  let verifier = codeVerifier;
-  if (!started.response.ok) {
-    started = await postTrakt("/oauth/device/code", { client_id: clientId });
-    verifier = "";
-  }
+  const started = await postTrakt("/oauth/device/code", { client_id: clientId });
   if (!started.response.ok || !started.payload.device_code || !started.payload.user_code) {
     json(response, started.response.status || 502, {
       error: started.payload.error_description || started.payload.error || cleanResponseText(started.text) || "Trakt did not start device sign-in.",
@@ -159,7 +149,6 @@ async function handleDeviceStart(response) {
   const expiresIn = Number(started.payload.expires_in) || 600;
   deviceLogins.set(state, {
     deviceCode: started.payload.device_code,
-    codeVerifier: verifier,
     expiresAt: Date.now() + expiresIn * 1000,
   });
   json(response, 200, {
@@ -180,22 +169,31 @@ async function handleDevicePoll(request, response) {
     json(response, 400, { error: "The Trakt code expired. Connect again." });
     return;
   }
-  const tokenBody = { code: entry.deviceCode, client_id: clientId };
-  if (entry.codeVerifier) tokenBody.code_verifier = entry.codeVerifier;
-  const polled = await postTrakt("/oauth/device/token", tokenBody);
+  const polled = await postTrakt("/oauth/device/token", {
+    code: entry.deviceCode,
+    client_id: clientId,
+  });
   if (polled.response.ok && polled.payload.access_token) {
     deviceLogins.delete(String(body.state || ""));
     json(response, 200, { status: "success", client_id: clientId, tokens: polled.payload });
     return;
   }
-  const error = String(polled.payload.error || "");
-  if (polled.response.status === 400 && (error === "authorization_pending" || error === "slow_down")) {
-    json(response, 200, { status: "pending", interval: error === "slow_down" ? 5 : 0 });
+  const error = String(polled.payload.error || "").toLowerCase();
+  const pending = polled.response.status === 400 || polled.response.status === 429;
+  const terminal = error === "expired_token"
+    || error === "access_denied"
+    || error === "invalid_grant"
+    || error === "invalid_client"
+    || polled.response.status === 404
+    || polled.response.status === 410
+    || polled.response.status === 418;
+  if (pending && !terminal) {
+    json(response, 200, { status: "pending", interval: error === "slow_down" || polled.response.status === 429 ? 5 : 0 });
     return;
   }
   deviceLogins.delete(String(body.state || ""));
   json(response, 400, {
-    error: polled.payload.error_description || error || cleanResponseText(polled.text) || "Trakt rejected the device sign-in.",
+    error: polled.payload.error_description || polled.payload.error || cleanResponseText(polled.text) || `Trakt device check returned HTTP ${polled.response.status}.`,
   });
 }
 

@@ -295,12 +295,19 @@ h3 {
   gap: 8px;
 }
 
+.trakt-device__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .trakt-device__code {
   margin: 0;
   color: var(--heading);
   font-size: 2rem;
   font-weight: 800;
   letter-spacing: 0.18em;
+  user-select: text;
 }
 
 .nuvio-form {

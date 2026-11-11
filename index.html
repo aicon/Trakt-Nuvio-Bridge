@@ -44,7 +44,10 @@
             <p class="card-copy">Trakt rejects a plain http address. Sign in with a code instead.</p>
             <div id="trakt-device" class="trakt-device" hidden>
               <p class="card-copy">Open <a id="trakt-device-link" href="https://trakt.tv/activate" target="_blank" rel="noopener">trakt.tv/activate</a> and enter this code.</p>
-              <p id="trakt-device-code" class="trakt-device__code"></p>
+              <div class="trakt-device__row">
+                <p id="trakt-device-code" class="trakt-device__code"></p>
+                <button id="trakt-device-copy" class="button button--ghost" type="button">Copy</button>
+              </div>
             </div>
             <div class="button-row">
               <button id="start-trakt-login" class="button button--light" type="button">Connect Trakt</button>

@@ -15,6 +15,7 @@ const dom = {
   startTraktLogin: $("#start-trakt-login"),
   traktDevice: $("#trakt-device"),
   traktDeviceCode: $("#trakt-device-code"),
+  traktDeviceCopy: $("#trakt-device-copy"),
   traktDeviceLink: $("#trakt-device-link"),
   logoutTrakt: $("#logout-trakt"),
   nuvioEmail: $("#nuvio-email"),
@@ -809,7 +810,12 @@ async function startTraktDeviceLogin() {
         }
         if (Number(result?.interval) > 0) waitMs += Number(result.interval) * 1000;
       } catch (error) {
-        failTraktDevice(loginEndpointError(error));
+        const message = loginEndpointError(error);
+        logLine(`Trakt sign in failed: ${message}`);
+        toast(message);
+        traktPending = false;
+        dom.startTraktLogin.disabled = false;
+        restoreButtonLabel(dom.startTraktLogin);
         return;
       }
       traktDeviceTimer = window.setTimeout(poll, waitMs);
@@ -2408,6 +2414,17 @@ bind(dom.previewSync, previewSync, "Loading preview...", "Preview ready");
 bind(dom.runSync, runSync, "Syncing...", "Synced");
 bind(dom.logoutTrakt, disconnectTrakt);
 bind(dom.logoutNuvio, disconnectNuvio);
+
+dom.traktDeviceCopy?.addEventListener("click", async () => {
+  const code = dom.traktDeviceCode?.textContent?.trim();
+  if (!code) return;
+  try {
+    await navigator.clipboard.writeText(code);
+    toast("Code copied.");
+  } catch {
+    toast(code);
+  }
+});
 
 dom.copyLog.addEventListener("click", async () => {
   await navigator.clipboard.writeText(dom.log.textContent);
